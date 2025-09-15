@@ -1,0 +1,324 @@
+-- OverHub GUI v2.9 (defaults 1|50|50|1.2, Auto Counter slider, No Endlag toggle, autoblock dash-safe)
+local Players=game:GetService("Players")
+local TweenService=game:GetService("TweenService")
+local StarterGui=game:GetService("StarterGui")
+local UserInputService=game:GetService("UserInputService")
+
+local LP=Players.LocalPlayer
+local PG=LP:WaitForChild("PlayerGui")
+for _,n in ipairs({"Overhub_AutoblockUI","DetectAnimGui","OverhubCamlockWidget","OverhubCamlockToggleMini"}) do local f=PG:FindFirstChild(n) if f then f:Destroy() end end
+
+-- Persist (new defaults and keys)
+_G.OverhubSave=_G.OverhubSave or {}
+local uid=tostring(LP.UserId)
+_G.OverhubSave[uid]=_G.OverhubSave[uid] or {}
+local SAVE=_G.OverhubSave[uid]
+local function def(k,v) if SAVE[k]==nil then SAVE[k]=v end end
+def("normal",1); def("special",50); def("skill",50); def("hold",1.2)
+def("detect",false); def("m1After",false); def("m1Catch",false); def("camlock",false)
+def("autoCounter",false); def("counterRange",13); def("noEndlag",true)
+def("dashBlockCooldown",0.25) -- time after dash before autoblock may re-enable
+local function persist() _G.OverhubSave[uid]=SAVE end
+
+-- Root panel
+local SG=Instance.new("ScreenGui") SG.Name="Overhub_AutoblockUI" SG.ResetOnSpawn=false SG.IgnoreGuiInset=true SG.Parent=PG
+local Root=Instance.new("Frame") Root.Name="Root" Root.Size=UDim2.new(0,460,0,310) Root.Position=UDim2.new(0.5,0,0.48,0) Root.AnchorPoint=Vector2.new(0.5,0.5)
+Root.BackgroundColor3=Color3.fromRGB(18,38,22) Root.BackgroundTransparency=0.06 Root.BorderSizePixel=0 Root.ClipsDescendants=true Root.Parent=SG
+Instance.new("UICorner",Root).CornerRadius=UDim.new(0,14)
+local rs=Instance.new("UIStroke",Root) rs.Thickness=1 rs.Color=Color3.fromRGB(60,200,140) rs.Transparency=0.1
+
+-- Header and Copy
+local Header=Instance.new("Frame") Header.BackgroundTransparency=1 Header.Size=UDim2.new(1,-20,0,34) Header.Position=UDim2.new(0,10,0,10) Header.Parent=Root
+local Title=Instance.new("TextLabel") Title.BackgroundTransparency=1 Title.Size=UDim2.new(0.55,0,1,0) Title.Position=UDim2.new(0,0,0,0)
+Title.Text="OverHub GUI" Title.Font=Enum.Font.GothamBold Title.TextScaled=false Title.TextSize=22 Title.TextColor3=Color3.fromRGB(255,255,255) Title.TextXAlignment=Enum.TextXAlignment.Left Title.Parent=Header
+local CopyBtn=Instance.new("TextButton") CopyBtn.Text="Copy Discord Link" CopyBtn.Size=UDim2.new(0,170,1,0) CopyBtn.Position=UDim2.new(1,-170,0,0)
+CopyBtn.BackgroundColor3=Color3.fromRGB(26,60,44) CopyBtn.TextColor3=Color3.fromRGB(255,255,255) CopyBtn.Font=Enum.Font.GothamBold CopyBtn.TextScaled=true CopyBtn.Parent=Header
+Instance.new("UICorner",CopyBtn).CornerRadius=UDim.new(0,10) local cps=Instance.new("UIStroke",CopyBtn) cps.Thickness=1 cps.Color=Color3.fromRGB(60,200,140) cps.Transparency=0.2
+local DISCORD="https://discord.gg/overhub" local Hidden=Instance.new("TextBox") Hidden.Size=UDim2.new(0,1,0,1) Hidden.Position=UDim2.new(1,9999,1,9999) Hidden.Parent=SG
+local function setClip(t) local env=getfenv and getfenv() or _G local f=(env and env.setclipboard) or _G.setclipboard or _G.toclipboard if f and typeof(f)=="function" then pcall(f,t) else Hidden.Text=t Hidden:CaptureFocus() Hidden.CursorPosition=#Hidden.Text+1 Hidden.SelectionStart=1 end end
+CopyBtn.MouseButton1Click:Connect(function() setClip(DISCORD) end)
+
+-- Body panes
+local Body=Instance.new("Frame") Body.BackgroundTransparency=1 Body.Size=UDim2.new(1,-20,1,-80) Body.Position=UDim2.new(0,10,0,50) Body.Parent=Root
+local MainPane=Instance.new("Frame") MainPane.BackgroundTransparency=1 MainPane.Size=UDim2.new(1,0,1,0) MainPane.Parent=Body
+local SettingsPane=Instance.new("Frame") SettingsPane.BackgroundTransparency=1 SettingsPane.Size=UDim2.new(1,0,1,0) SettingsPane.Visible=false SettingsPane.Parent=Body
+local NewPane=Instance.new("Frame") NewPane.BackgroundTransparency=1 NewPane.Size=UDim2.new(1,0,1,0) NewPane.Visible=false NewPane.Parent=Body
+
+-- New tab
+local NewTitle=Instance.new("TextLabel") NewTitle.BackgroundTransparency=1 NewTitle.Text="Changelog" NewTitle.Font=Enum.Font.GothamBold NewTitle.TextScaled=false NewTitle.TextSize=18 NewTitle.TextColor3=Color3.fromRGB(255,255,255) NewTitle.Size=UDim2.new(1,0,0,22) NewTitle.Parent=NewPane
+local NewJoin=Instance.new("TextLabel") NewJoin.BackgroundTransparency=1 NewJoin.Text="Join discord for Auto Techs, M1 Reset, etc!" NewJoin.Font=Enum.Font.Gotham NewJoin.TextScaled=false NewJoin.TextSize=13 NewJoin.TextColor3=Color3.fromRGB(210,255,255) NewJoin.Size=UDim2.new(1,0,0,18) NewJoin.Position=UDim2.new(0,0,0,24) NewJoin.Parent=NewPane
+local NewText=Instance.new("TextLabel") NewText.BackgroundTransparency=1 NewText.Text="• Autoblock dash-safe\n• Auto Counter + slider\n• No Endlag toggle\n• Saved defaults 1|50|50|1.2" NewText.Font=Enum.Font.Gotham NewText.TextScaled=false NewText.TextSize=14 NewText.TextWrapped=true NewText.TextColor3=Color3.fromRGB(230,255,240) NewText.Size=UDim2.new(1,-10,1,-47) NewText.Position=UDim2.new(0,5,0,42) NewText.Parent=NewPane
+
+-- Status + main toggles
+local Status=Instance.new("TextLabel") Status.Name="Status" Status.BackgroundTransparency=1 Status.Size=UDim2.new(1,-34,0,40) Status.Text=(SAVE.detect and "AUTOBLOCK: ON" or "AUTOBLOCK: OFF") Status.Font=Enum.Font.GothamBlack Status.TextScaled=true Status.TextColor3=Color3.fromRGB(95,255,185) Status.Parent=MainPane
+local Controls=Instance.new("Frame") Controls.BackgroundTransparency=1 Controls.Size=UDim2.new(1,0,0,140) Controls.Position=UDim2.new(0,0,0,46) Controls.Parent=MainPane
+local function mkRow(text,y) local l=Instance.new("TextLabel") l.BackgroundTransparency=1 l.Text=text l.Size=UDim2.new(0.64,0,0,24) l.Position=UDim2.new(0.04,0,0,y) l.Font=Enum.Font.Gotham l.TextScaled=true l.TextColor3=Color3.fromRGB(230,255,240) l.TextXAlignment=Enum.TextXAlignment.Left l.Parent=Controls
+  local b=Instance.new("TextButton") b.Size=UDim2.new(0,80,0,24) b.Position=UDim2.new(1,-90,0,y) b.Text="OFF" b.BackgroundColor3=Color3.fromRGB(26,60,44) b.TextColor3=Color3.new(1,1,1) b.Font=Enum.Font.GothamBold b.TextScaled=true b.Parent=Controls Instance.new("UICorner",b).CornerRadius=UDim.new(0,8) local s=Instance.new("UIStroke",b) s.Thickness=1 s.Color=Color3.fromRGB(60,200,140) s.Transparency=0.2 return b end
+local tDetect=mkRow("Auto Block",0) local tAfter=mkRow("M1 After Block",28) local tCatch=mkRow("M1 Dodge",56) local tCam=mkRow("Camlock Toggle",84) local tAC=mkRow("Auto Counter",112)
+local function setT(btn,on) btn.Text=on and "ON" or "OFF" TweenService:Create(btn,TweenInfo.new(0.1,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{BackgroundColor3=on and Color3.fromRGB(0,170,110) or Color3.fromRGB(26,60,44)}):Play() end
+setT(tDetect,SAVE.detect) setT(tAfter,SAVE.m1After) setT(tCatch,SAVE.m1Catch) setT(tCam,SAVE.camlock) setT(tAC,SAVE.autoCounter)
+
+-- Settings inputs group
+local function mkBox(p,size,pos,ph,txt) local b=Instance.new("TextBox") b.Size=size b.Position=pos b.PlaceholderText=ph b.Text=txt or "" b.BackgroundColor3=Color3.fromRGB(26,60,44) b.TextColor3=Color3.new(1,1,1) b.Font=Enum.Font.Gotham b.TextScaled=true b.Parent=p Instance.new("UICorner",b).CornerRadius=UDim.new(0,8) local s=Instance.new("UIStroke",b) s.Thickness=1 s.Color=Color3.fromRGB(60,200,140) s.Transparency=0.2 return b end
+local ST=Instance.new("TextLabel") ST.BackgroundTransparency=1 ST.Text="Settings" ST.Font=Enum.Font.GothamBold ST.TextScaled=false ST.TextSize=18 ST.TextColor3=Color3.fromRGB(255,255,255) ST.Size=UDim2.new(1,0,0,22) ST.Parent=SettingsPane
+local nBox=mkBox(SettingsPane,UDim2.new(0.28,0,0,28),UDim2.new(0.04,0,0,28),"M1",tostring(SAVE.normal))
+local sBox=mkBox(SettingsPane,UDim2.new(0.28,0,0,28),UDim2.new(0.36,0,0,28),"Special",tostring(SAVE.special))
+local kBox=mkBox(SettingsPane,UDim2.new(0.28,0,0,28),UDim2.new(0.68,0,0,28),"Skill",tostring(SAVE.skill))
+local hBox=mkBox(SettingsPane,UDim2.new(0.28,0,0,28),UDim2.new(0.04,0,0,62),"Hold",tostring(SAVE.hold))
+local acBox=mkBox(SettingsPane,UDim2.new(0.28,0,0,28),UDim2.new(0.36,0,0,62),"Counter Dist",tostring(SAVE.counterRange))
+local dlBox=mkBox(SettingsPane,UDim2.new(0.28,0,0,28),UDim2.new(0.68,0,0,62),"Dash CD",tostring(SAVE.dashBlockCooldown))
+-- No Endlag toggle
+local noEndlagRow=Instance.new("TextLabel") noEndlagRow.BackgroundTransparency=1 noEndlagRow.Text="No Endlag (M1 Reset)" noEndlagRow.Size=UDim2.new(0.64,0,0,24) noEndlagRow.Position=UDim2.new(0.04,0,0,96) noEndlagRow.Font=Enum.Font.Gotham noEndlagRow.TextScaled=true noEndlagRow.TextColor3=Color3.fromRGB(230,255,240) noEndlagRow.TextXAlignment=Enum.TextXAlignment.Left noEndlagRow.Parent=SettingsPane
+local tNEL=Instance.new("TextButton") tNEL.Size=UDim2.new(0,80,0,24) tNEL.Position=UDim2.new(1,-90,0,96) tNEL.Text="OFF" tNEL.BackgroundColor3=Color3.fromRGB(26,60,44) tNEL.TextColor3=Color3.new(1,1,1) tNEL.Font=Enum.Font.GothamBold tNEL.TextScaled=true tNEL.Parent=SettingsPane Instance.new("UICorner",tNEL).CornerRadius=UDim.new(0,8) local nelS=Instance.new("UIStroke",tNEL) nelS.Thickness=1 nelS.Color=Color3.fromRGB(60,200,140) nelS.Transparency=0.2
+
+-- Info label
+local Info=Instance.new("TextLabel") Info.Name="InfoLabel" Info.BackgroundTransparency=1 Info.Size=UDim2.new(1,-170,0,15) Info.Position=UDim2.new(0,10,1,-16)
+Info.Font=Enum.Font.GothamBold Info.TextScaled=false Info.TextSize=13 Info.TextColor3=Color3.fromRGB(200,255,200) Info.TextXAlignment=Enum.TextXAlignment.Left Info.Parent=Root
+local function setInfo() Info.Text=string.format("Ranges  M1 %d,  Special %d,  Skill %d", SAVE.normal,SAVE.special,SAVE.skill) end
+setInfo()
+
+-- Bottom-right nav
+local Nav=Instance.new("Frame") Nav.BackgroundTransparency=1 Nav.Size=UDim2.new(0,210,0,30) Nav.AnchorPoint=Vector2.new(1,1) Nav.Position=UDim2.new(1,-12,1,-10) Nav.Parent=Root
+local function makeNav(txt,xoff,w) local b=Instance.new("TextButton") b.Text=txt b.Size=UDim2.new(0,w,1,0) b.Position=UDim2.new(0,xoff,0,0) b.BackgroundColor3=Color3.fromRGB(26,60,44) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.GothamBold b.TextScaled=true b.Parent=Nav Instance.new("UICorner",b).CornerRadius=UDim.new(0,10) local st=Instance.new("UIStroke",b) st.Thickness=1 st.Color=Color3.fromRGB(60,200,140) st.Transparency=0.2 return b end
+local NewBtn=makeNav("New",0,90) local SettingsBtn=makeNav("Settings",100,100)
+local function showPane(which) MainPane.Visible=(which=="main") SettingsPane.Visible=(which=="settings") NewPane.Visible=(which=="new") end
+NewBtn.MouseButton1Click:Connect(function() showPane(NewPane.Visible and "main" or "new") end)
+SettingsBtn.MouseButton1Click:Connect(function() showPane(SettingsPane.Visible and "main" or "settings") end)
+
+-- Toggle wiring + save
+local function wrapSet(btn,val) setT(btn,val) persist() end
+tDetect.MouseButton1Click:Connect(function() SAVE.detect=not SAVE.detect wrapSet(tDetect,SAVE.detect) Status.Text=SAVE.detect and "AUTOBLOCK: ON" or "AUTOBLOCK: OFF" end)
+tAfter.MouseButton1Click:Connect(function() SAVE.m1After=not SAVE.m1After wrapSet(tAfter,SAVE.m1After) end)
+tCatch.MouseButton1Click:Connect(function() SAVE.m1Catch=not SAVE.m1Catch wrapSet(tCatch,SAVE.m1Catch) end)
+tCam.MouseButton1Click:Connect(function() SAVE.camlock=not SAVE.camlock wrapSet(tCam,SAVE.camlock) end)
+tAC.MouseButton1Click:Connect(function() SAVE.autoCounter=not SAVE.autoCounter wrapSet(tAC,SAVE.autoCounter) end)
+tNEL.MouseButton1Click:Connect(function() SAVE.noEndlag=not SAVE.noEndlag wrapSet(tNEL,SAVE.noEndlag) end)
+setT(tNEL,SAVE.noEndlag)
+
+nBox.FocusLost:Connect(function() local v=tonumber(nBox.Text) if v then SAVE.normal=v persist() setInfo() end end)
+sBox.FocusLost:Connect(function() local v=tonumber(sBox.Text) if v then SAVE.special=v persist() setInfo() end end)
+kBox.FocusLost:Connect(function() local v=tonumber(kBox.Text) if v then SAVE.skill=v persist() setInfo() end end)
+hBox.FocusLost:Connect(function() local v=tonumber(hBox.Text) if v and v>0 then SAVE.hold=v persist() end end)
+acBox.FocusLost:Connect(function() local v=tonumber(acBox.Text) if v then SAVE.counterRange=v persist() end end)
+dlBox.FocusLost:Connect(function() local v=tonumber(dlBox.Text) if v then SAVE.dashBlockCooldown=v persist() end end)
+
+-- Minimizer (small shield glyph)
+local bubble=Instance.new("TextButton",SG) bubble.Name="OverhubBubble" bubble.Size=UDim2.new(0,44,0,44) bubble.Position=UDim2.new(0,10,0.5,-90)
+bubble.Text="🛡️" bubble.BackgroundColor3=Color3.fromRGB(26,60,44) bubble.TextColor3=Color3.new(1,1,1) bubble.Font=Enum.Font.Gotham bold=false bubble.TextScaled=false bubble.TextSize=18
+Instance.new("UICorner",bubble).CornerRadius=UDim.new(0,12) local bstroke=Instance.new("UIStroke",bubble) bstroke.Thickness=1 bstroke.Color=Color3.fromRGB(60,200,140) bstroke.Transparency=0.1
+bubble.MouseButton1Click:Connect(function() Root.Visible=not Root.Visible end)
+do local dragging,st,sp,inp=false,nil,nil,nil
+  bubble.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true st=i.Position or Vector3.new() sp=bubble.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end) end end)
+  bubble.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then inp=i end end)
+  UserInputService.InputChanged:Connect(function(i) if i==inp and dragging then local p=i.Position or Vector3.new() local d=p-st bubble.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y) end end)
+end
+
+-- Separate Camlock Toggle mini GUI (draggable)
+local Mini=Instance.new("ScreenGui") Mini.Name="OverhubCamlockToggleMini" Mini.ResetOnSpawn=false Mini.IgnoreGuiInset=true Mini.Parent=PG
+local MiniBtn=Instance.new("TextButton") MiniBtn.Name="CamlockMini" MiniBtn.Size=UDim2.new(0,120,0,28) MiniBtn.Position=UDim2.new(0,12,0,60)
+MiniBtn.BackgroundColor3=Color3.fromRGB(26,60,44) MiniBtn.TextColor3=Color3.new(1,1,1) MiniBtn.Font=Enum.Font.GothamBold MiniBtn.TextScaled=true MiniBtn.Text= (SAVE.camlock and "Camlock: ON" or "Camlock: OFF") MiniBtn.Parent=Mini
+Instance.new("UICorner",MiniBtn).CornerRadius=UDim.new(0,10) local mbst=Instance.new("UIStroke",MiniBtn) mbst.Thickness=1 mbst.Color=Color3.fromRGB(60,200,140) mbst.Transparency=0.2
+MiniBtn.MouseButton1Click:Connect(function() SAVE.camlock=not SAVE.camlock persist() MiniBtn.Text= SAVE.camlock and "Camlock: ON" or "Camlock: OFF" end)
+do local d,st,sp,inp=false,nil,nil,nil
+  MiniBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=true st=i.Position or Vector3.new() sp=MiniBtn.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then d=false end end) end end)
+  MiniBtn.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then inp=i end end)
+  UserInputService.InputChanged:Connect(function(i) if i==inp and d then local p=i.Position or Vector3.new() local dd=p-st MiniBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dd.X,sp.Y.Scale,sp.Y.Offset+dd.Y) end end)
+end
+
+-- Make Root draggable
+do local d,st,sp,inp=false,nil,nil,nil
+  Root.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=true st=i.Position or Vector3.new() sp=Root.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then d=false end end) end end)
+  Root.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then inp=i end end)
+  UserInputService.InputChanged:Connect(function(i) if i==inp and d then local p=i.Position or Vector3.new() local dd=p-st Root.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dd.X,sp.Y.Scale,sp.Y.Offset+dd.Y) end end)
+end
+
+_G.OverhubUI={Root=Root,InfoLabel=Info,Status=Status,State={
+  normalRange=function() return SAVE.normal end,specialRange=function() return SAVE.special end,skillRange=function() return SAVE.skill end,skillDelay=function() return SAVE.hold end,
+  detectActive=function() return SAVE.detect end,m1After=function() return SAVE.m1After end,m1Catch=function() return SAVE.m1Catch end,camlock=function() return SAVE.camlock end,
+  autoCounter=function() return SAVE.autoCounter end,counterRange=function() return SAVE.counterRange end,noEndlag=function() return SAVE.noEndlag end,
+  dashBlockCooldown=function() return SAVE.dashBlockCooldown end,
+  setDetect=function(v) SAVE.detect=v persist() end},
+  _save=SAVE
+}
+-- end of snippet 1
+-- Logic v2.9 (autoblock dash-safe, Auto Counter, No Endlag integration, snappy camlock/ESP unchanged)
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local VirtualInputManager=game:GetService("VirtualInputManager")
+local LP=Players.LocalPlayer
+local UI=_G.OverhubUI or {} local S=UI.State or {}
+
+-- Common fire
+local function fireRemote(goal,mobile)
+  local args={{Goal=goal,Key=(goal=="KeyPress" or goal=="KeyRelease") and Enum.KeyCode.F or nil,Mobile=mobile or nil}}
+  local ch=LP.Character if not ch then return end
+  local c=ch:FindFirstChild("Communicate") if c then c:FireServer(unpack(args)) end
+end
+
+-- Dash-aware autoblock inhibit
+local lastDashAt=0
+local function markDash() lastDashAt=os.clock() end
+
+-- Hook simple dash detect via Q and movement keys
+game:GetService("UserInputService").InputBegan:Connect(function(input,processed)
+  if processed then return end
+  if input.KeyCode==Enum.KeyCode.Q then markDash() end
+end)
+
+-- Auto Counter IDs (from user)
+local delayed={ ["rbxassetid://10479335397"]=true, ["rbxassetid://13380255751"]=true, ["rbxassetid://134775406437626"]=true }
+local normal={
+ ["rbxassetid://10469493270"]=true,["rbxassetid://10469630950"]=true,["rbxassetid://10469639222"]=true,["rbxassetid://10469643643"]=true,
+ ["rbxassetid://13532562418"]=true,["rbxassetid://13532600125"]=true,["rbxassetid://13532604085"]=true,["rbxassetid://13294471966"]=true,
+ ["rbxassetid://13491635433"]=true,["rbxassetid://13296577783"]=true,["rbxassetid://13295919399"]=true,["rbxassetid://13295936866"]=true,
+ ["rbxassetid://13370310513"]=true,["rbxassetid://13390230973"]=true,["rbxassetid://13378751717"]=true,["rbxassetid://13378708199"]=true,
+ ["rbxassetid://14004222985"]=true,["rbxassetid://13997092940"]=true,["rbxassetid://14001963401"]=true,["rbxassetid://14136436157"]=true,
+ ["rbxassetid://15259161390"]=true,["rbxassetid://15240216931"]=true,["rbxassetid://15240176873"]=true,["rbxassetid://15162694192"]=true,
+ ["rbxassetid://16515503507"]=true,["rbxassetid://16515520431"]=true,["rbxassetid://16515448089"]=true,["rbxassetid://16552234590"]=true,
+ ["rbxassetid://17889458563"]=true,["rbxassetid://17889461810"]=true,["rbxassetid://17889471098"]=true,["rbxassetid://17889290569"]=true,
+ ["rbxassetid://123005629431309"]=true,["rbxassetid://100059874351664"]=true,["rbxassetid://104895379416342"]=true,
+ ["rbxassetid://10468665991"]=true,["rbxassetid://10466974800"]=true,["rbxassetid://10471336737"]=true,["rbxassetid://12510170988"]=true,
+ ["rbxassetid://12272894215"]=true,["rbxassetid://12296882427"]=true,["rbxassetid://12307656616"]=true,["rbxassetid://101588604872680"]=true,
+ ["rbxassetid://105442749844047"]=true,["rbxassetid://109617620932970"]=true,["rbxassetid://131820095363270"]=true,["rbxassetid://135289891173395"]=true,
+ ["rbxassetid://125955606488863"]=true,["rbxassetid://12534735382"]=true,["rbxassetid://12502664044"]=true,["rbxassetid://12509505723"]=true,
+ ["rbxassetid://12618271998"]=true,["rbxassetid://12684390285"]=true,["rbxassetid://13376869471"]=true,["rbxassetid://13294790250"]=true,
+ ["rbxassetid://13376962659"]=true,["rbxassetid://13501296372"]=true,["rbxassetid://13556985475"]=true,["rbxassetid://145162735010"]=true,
+ ["rbxassetid://14046756619"]=true,["rbxassetid://14299135500"]=true,["rbxassetid://14351441234"]=true,["rbxassetid://15290930205"]=true,
+ ["rbxassetid://15145462680"]=true,["rbxassetid://15295895753"]=true,["rbxassetid://15295336270"]=true,["rbxassetid://16139108718"]=true,
+ ["rbxassetid://16515850153"]=true,["rbxassetid://16431491215"]=true,["rbxassetid://16597322398"]=true,["rbxassetid://16597912086"]=true,
+ ["rbxassetid://17799224866"]=true,["rbxassetid://17838006839"]=true,["rbxassetid://17857788598"]=true,["rbxassetid://18179181663"]=true,
+ ["rbxassetid://113166426814229"]=true,["rbxassetid://116753755471636"]=true,["rbxassetid://116153572280464"]=true,["rbxassetid://114095570398448"]=true,["rbxassetid://77509627104305"]=true
+}
+local activated={} -- per enemy track de-dup
+
+-- Auto Counter action
+local function counterFire()
+  local ch=LP.Character if not ch then return end
+  local comm=ch:FindFirstChild("Communicate") if not comm then return end
+  local prey=LP.Backpack and LP.Backpack:FindFirstChild("Prey's Peril")
+  if prey then comm:FireServer({Tool=prey,Goal="Console Move"}) end
+  local split=LP.Backpack and LP.Backpack:FindFirstChild("Split Second Counter")
+  if split then comm:FireServer({Tool=split,Goal="Console Move"}) end
+end
+
+-- Helpers
+local function myHRP() local ch=LP.Character if not ch then return nil end return ch:FindFirstChild("HumanoidRootPart") end
+
+-- Autoblock logic pieces from previous version, dash-safe gate added
+local function autoblockAllowed()
+  -- inhibit during and shortly after dash
+  local cd=S.dashBlockCooldown and S.dashBlockCooldown() or 0.25
+  if os.clock()-lastDashAt < cd then return false end
+  return S.detectActive and S.detectActive() or false
+end
+
+-- Existing animation-based block detection (trimmed: keep core)
+local function scanAndBlock()
+  if not autoblockAllowed() then return end
+  local my=myHRP() if not my then return end
+  -- scan Live or players
+  local live=workspace:FindFirstChild("Live")
+  local function eachTargets(cb)
+    if live then for _,m in ipairs(live:GetChildren()) do cb(m) end
+    else for _,p in ipairs(Players:GetPlayers()) do if p~=LP and p.Character then cb(p.Character) end end end
+  end
+  eachTargets(function(char)
+    local hrp=char:FindFirstChild("HumanoidRootPart")
+    local hum=char:FindFirstChildWhichIsA("Humanoid")
+    local an=hum and hum:FindFirstChildOfClass("Animator")
+    if not (hrp and hum and an) then return end
+    local dist=(hrp.Position-my.Position).Magnitude
+    local nR=S.normalRange and S.normalRange() or 1
+    local sR=S.specialRange and S.specialRange() or 50
+    local kR=S.skillRange and S.skillRange() or 50
+    local kHold=S.skillDelay and S.skillDelay() or 1.2
+
+    local playing={} for _,tr in ipairs(an:GetPlayingAnimationTracks()) do
+      local raw=tr.Animation and tr.Animation.AnimationId
+      if raw then playing[raw]=true end
+    end
+
+    -- Normal block window
+    local normalHit=false
+    for id,_ in pairs(playing) do if normal[id] then normalHit=true break end end
+    if normalHit and dist<=nR then
+      fireRemote("KeyPress"); task.wait(0.15); fireRemote("KeyRelease")
+      if S.m1After and S.m1After() then
+        -- doAfter kept as release burst
+        fireRemote("Communicate",true)
+        task.delay(0.2,function() fireRemote("LeftClickRelease",true) end)
+      end
+      return
+    end
+
+    -- Specials
+    local specialHit=false
+    for id,_ in pairs(playing) do if delayed[id] then specialHit=true break end end
+    if specialHit and dist<=sR and not (S.m1Catch and S.m1Catch()) then
+      fireRemote("KeyPress"); task.delay(1,function() fireRemote("KeyRelease") end)
+      return
+    end
+
+    -- Skills (hold)
+    local anySkill=false
+    for id,_ in pairs(playing) do if normal[id] and not delayed[id] then anySkill=true break end end
+    if anySkill and dist<=kR then
+      fireRemote("KeyPress"); task.delay(kHold,function() fireRemote("KeyRelease") end)
+      return
+    end
+  end)
+end
+
+-- Auto Counter loop
+local function autoCounterTick()
+  if not (S.autoCounter and S.autoCounter()) then return end
+  local my=myHRP() if not my then return end
+  local rng=S.counterRange and S.counterRange() or 13
+  local live=workspace:FindFirstChild("Live")
+  local targets=live and live:GetChildren() or {}
+  if not live then for _,p in ipairs(Players:GetPlayers()) do if p~=LP and p.Character then table.insert(targets,p.Character) end end end
+  for _,char in ipairs(targets) do
+    local hrp=char and char:FindFirstChild("HumanoidRootPart")
+    local hum=char and char:FindFirstChildWhichIsA("Humanoid")
+    local an=hum and hum:FindFirstChildOfClass("Animator")
+    if hrp and hum and an then
+      local d=(hrp.Position-my.Position).Magnitude
+      if d<=rng then
+        for _,tr in ipairs(an:GetPlayingAnimationTracks()) do
+          local id=tr.Animation and tr.Animation.AnimationId
+          if id and (normal[id] or delayed[id]) then
+            local key=tostring(char:GetDebugId())..id
+            if not activated[key] then
+              activated[key]=true
+              if delayed[id] then task.delay(0.05,counterFire) else counterFire() end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- No Endlag integration: respect SAVE.noEndlag; ported core gating
+do
+  local UIS=game:GetService("UserInputService")
+  local lastDash=0
+  UIS.InputBegan:Connect(function(input,processed)
+    if processed then return end
+    if input.KeyCode==Enum.KeyCode.Q then
+      lastDash=os.clock(); if S.noEndlag and not S.noEndlag() then return end
+      -- prefer forward dash: only if not pressing A/S/D (kept logic simple)
+      if not (UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.S) or UIS:IsKeyDown(Enum.KeyCode.D)) then
+        fireRemote("KeyPress") -- simulate small unblock if needed
+      end
+    end
+  end)
+end
+
+-- ESP camlock remains from previous version if present (not included here to keep size)
+
+-- Heartbeat loops
+RunService.Heartbeat:Connect(function()
+  pcall(scanAndBlock)
+  pcall(autoCounterTick)
+end)
