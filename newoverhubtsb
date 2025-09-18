@@ -1,27 +1,23 @@
--- OverHub x WindUI v1.0 (WindUI frontend, persistent state, blur, FPS Boost)
+-- OverHub x WindUI v1.1 — build-only UI (no demo), state persistence, blur, FPS boost
 local Players=game:GetService("Players")
 local TweenService=game:GetService("TweenService")
 local Lighting=game:GetService("Lighting")
 local UserInputService=game:GetService("UserInputService")
+local StarterGui=game:GetService("StarterGui")
 local LP=Players.LocalPlayer
 local PG=LP:WaitForChild("PlayerGui")
 
--- Load WindUI (fallback to Example.lua if CDN path changes)
-local function loadWind()
+-- 1) Strict WindUI source loader (no Example fallback to avoid demo UI)
+local function loadWindStrict()
     local ok,lib=pcall(function()
         return loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/Source.lua"))()
     end)
-    if not ok or type(lib)~="table" then
-        ok,lib=pcall(function()
-            return loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/Example.lua"))()
-        end)
-    end
     return ok and lib or nil
 end
-local WindUI=loadWind()
-if not WindUI then return warn("WindUI failed to load") end
+local WindUI=loadWindStrict()
+if not WindUI then return warn("WindUI Source.lua failed to load; aborting UI to avoid demo") end
 
--- Persist with defaults
+-- 2) Persistence defaults
 _G.OverhubSave=_G.OverhubSave or {}
 local uid=tostring(LP.UserId)
 _G.OverhubSave[uid]=_G.OverhubSave[uid] or {}
@@ -34,7 +30,7 @@ def("dashBlockCooldown",0.25); def("m1BlockCooldown",0.25)
 def("fpsBoost",false)
 local function persist() _G.OverhubSave[uid]=SAVE end
 
--- Live blur on open/close
+-- 3) Blur on open/close
 local cam=workspace.CurrentCamera
 local Blur=Instance.new("BlurEffect") Blur.Enabled=false Blur.Size=0 Blur.Parent=cam
 local function setBlur(on)
@@ -47,17 +43,16 @@ local function setBlur(on)
     end
 end
 
--- Window
+-- 4) Build ONLY OverHub UI
 local Window=WindUI:CreateWindow({
     Title="OverHub GUI",
     SubTitle="Autoblock Suite",
-    Size=UDim2.new(0,420,0,300), -- smaller overall
+    Size=UDim2.new(0,420,0,300),
     Theme="Dark",
     Draggable=true,
-    Closable=true,
-    FastDrag=true
+    FastDrag=true,
+    Closable=true
 })
-
 Window:OnOpened(function() setBlur(true) end)
 Window:OnClosed(function() setBlur(false) end)
 
@@ -66,67 +61,65 @@ local TabMain=Window:CreateTab({Title="Main",Icon="Shield"})
 local TabSettings=Window:CreateTab({Title="Settings",Icon="Cog"})
 local TabNews=Window:CreateTab({Title="New",Icon="Newspaper"})
 
--- Helper for animated WindUI toggles persisting
+-- Helpers
 local function addToggle(section,label,key,tip)
-    return section:AddToggle({
-        Title=label,
-        Description=tip or "",
-        Default=SAVE[key]==true,
-        Callback=function(v) SAVE[key]=v persist() end
-    })
+    local t=section:AddToggle({Title=label,Description=tip or "",Default=SAVE[key]==true,Callback=function(v) SAVE[key]=v persist() end})
+    return t
 end
-local function addBox(section,label,key,ph)
-    return section:AddInput({
-        Title=label, Placeholder=ph or "", Default=tostring(SAVE[key]),
-        Numeric=true, Callback=function(txt) local n=tonumber(txt) if n then SAVE[key]=n persist() end end
-    })
+local function addInput(section,label,key,ph)
+    section:AddInput({Title=label,Placeholder=ph or "",Default=tostring(SAVE[key]),Numeric=true,Callback=function(txt)local n=tonumber(txt) if n then SAVE[key]=n persist() end end})
 end
 local function addSlider(section,label,key,min,max,step)
-    return section:AddSlider({
-        Title=label, Min=min, Max=max, Default=SAVE[key], Rounding=0, Callback=function(n) SAVE[key]=n persist() end, Increment=step or 1
-    })
+    section:AddSlider({Title=label,Min=min,Max=max,Default=SAVE[key],Increment=step or 1,Rounding=0,Callback=function(n) SAVE[key]=n persist() end})
 end
-local function addButton(section,label,cb)
-    return section:AddButton({Title=label, Callback=cb})
-end
+local function addButton(section,label,cb) section:AddButton({Title=label,Callback=cb}) end
+local function addParagraph(section,title,content) return section:AddParagraph({Title=title,Content=content}) end
 
--- MAIN
+-- Main
 local S1=TabMain:CreateSection({Title="Status"})
-local statusLabel=S1:AddParagraph({Title="AUTOBLOCK",Content= SAVE.detect and "ON" or "OFF"})
-local function refreshStatus() statusLabel:SetContent(SAVE.detect and "ON" or "OFF") end
+local statusPara=addParagraph(S1,"AUTOBLOCK", SAVE.detect and "ON" or "OFF")
+local function refreshStatus() statusPara:SetContent(SAVE.detect and "ON" or "OFF") end
 
 local S2=TabMain:CreateSection({Title="Toggles"})
 local tDetect=addToggle(S2,"Auto Block","detect")
-local tAfter=addToggle(S2,"M1 After Block","m1After")
-local tCatch=addToggle(S2,"M1 Dodge","m1Catch")
-local tCam=addToggle(S2,"Camlock Toggle","camlock")
-local tAC =addToggle(S2,"Auto Counter","autoCounter")
-local tNEL=addToggle(S2,"No Endlag (M1 Reset)","noEndlag")
+local tAfter =addToggle(S2,"M1 After Block","m1After")
+local tCatch =addToggle(S2,"M1 Dodge","m1Catch")
+local tCam   =addToggle(S2,"Camlock Toggle","camlock")
+local tAC    =addToggle(S2,"Auto Counter","autoCounter")
+local tNEL   =addToggle(S2,"No Endlag (M1 Reset)","noEndlag")
 tDetect:OnChanged(refreshStatus)
 
--- SETTINGS
+-- Settings
 local S3=TabSettings:CreateSection({Title="Ranges"})
-addBox(S3,"M1 Range","normal","1")
-addBox(S3,"Special Range","special","50")
-addBox(S3,"Skill Range","skill","50")
-addBox(S3,"Skill Hold","hold","1.2")
+addInput(S3,"M1 Range","normal","1")
+addInput(S3,"Special Range","special","50")
+addInput(S3,"Skill Range","skill","50")
+addInput(S3,"Skill Hold","hold","1.2")
 
 local S4=TabSettings:CreateSection({Title="Auto Counter"})
 addSlider(S4,"Counter Distance","counterRange",5,30,1)
 
 local S5=TabSettings:CreateSection({Title="Blocking Gates"})
-addBox(S5,"Dash Block CD","dashBlockCooldown","0.25")
-addBox(S5,"M1 Block CD","m1BlockCooldown","0.25")
+addInput(S5,"Dash Block CD","dashBlockCooldown","0.25")
+addInput(S5,"M1 Block CD","m1BlockCooldown","0.25")
 
 local S6=TabSettings:CreateSection({Title="Performance"})
 local tFPS=addToggle(S6,"FPS Boost","fpsBoost","Disable effects/particles/shadows to reduce lag")
 
--- NEWS
+-- News
 local N1=TabNews:CreateSection({Title="Changelog"})
-N1:AddParagraph({Title="Info",Content="Join discord for Auto Techs, M1 Reset, etc!"})
-N1:AddParagraph({Title="v1.0 (WindUI)",Content="- Moved UI to WindUI\n- Blur on open/close\n- Animated toggles\n- FPS Boost option"})
+addParagraph(N1,"Info","Join discord for Auto Techs, M1 Reset, etc!")
+addParagraph(N1,"v1.1","- Switched to WindUI Source loader\n- Removed demo example\n- Kept all features/toggles")
 
--- Camlock mini toggle pill (separate small draggable)
+-- Copy button (top-right helper via WindUI button row)
+local TopBar=Window:CreateTab({Title="Links",Icon="Link"})
+local L1=TopBar:CreateSection({Title="Discord"})
+addButton(L1,"Copy Discord Link",function()
+    local DISCORD="https://discord.gg/overhub"
+    local f=(setclipboard or toclipboard) if f then pcall(f,DISCORD) else StarterGui:SetCore("SetClipboard",DISCORD) end
+end)
+
+-- Camlock mini pill stays (small helper)
 local MiniSG=Instance.new("ScreenGui") MiniSG.Name="OverhubCamlockToggleMini" MiniSG.ResetOnSpawn=false MiniSG.IgnoreGuiInset=true MiniSG.Parent=PG
 local MiniBtn=Instance.new("TextButton") MiniBtn.Name="CamlockMini" MiniBtn.Size=UDim2.new(0,120,0,28) MiniBtn.Position=UDim2.new(0,12,0,60)
 MiniBtn.BackgroundColor3=Color3.fromRGB(26,60,44) MiniBtn.TextColor3=Color3.new(1,1,1) MiniBtn.Font=Enum.Font.GothamBold MiniBtn.TextScaled=true MiniBtn.Text= (SAVE.camlock and "Camlock: ON" or "Camlock: OFF") MiniBtn.Parent=MiniSG
@@ -138,9 +131,9 @@ do local d,st,sp,inp=false,nil,nil,nil
   UserInputService.InputChanged:Connect(function(i) if i==inp and d then local p=i.Position or Vector3.new() local dd=p-st MiniBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dd.X,sp.Y.Scale,sp.Y.Offset+dd.Y) end end)
 end
 
--- FPS Boost controller (callable + immediate apply)
+-- FPS Boost controller + wire to WindUI toggle
 _G.__OverhubFPS=function(enabled)
-  local ok=pcall(function()
+  pcall(function()
     if enabled then
       settings().Rendering.QualityLevel=Enum.QualityLevel.Level01
       settings().Rendering.MeshPartDetailLevel=Enum.MeshPartDetailLevel.Level01
@@ -175,7 +168,7 @@ _G.OverhubUI={
   _save=SAVE
 }
 -- end of snippet 1
--- Logic v1.0 (same behavior; reads state from WindUI export)
+-- OverHub logic (unchanged; reads state from WindUI export)
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UserInputService=game:GetService("UserInputService")
@@ -204,15 +197,16 @@ UserInputService.InputEnded:Connect(function(input)
   if input.UserInputType==Enum.UserInputType.MouseButton1 then leftClickActive=false end
 end)
 
--- Self anim mark
-local function observeSelf()
-  local c=myChar() if not c then return end
-  local hum=c:FindFirstChildOfClass("Humanoid")
-  local an=hum and hum:FindFirstChildOfClass("Animator")
-  if an then an.AnimationPlayed:Connect(function() lastOwnM1At=os.clock() end) end
+local function autoblockAllowed()
+  if not (S.detectActive and S.detectActive()) then return false end
+  local now=os.clock()
+  local dashCD=S.dashBlockCooldown and S.dashBlockCooldown() or 0.25
+  if (now-lastDashAt) < dashCD then return false end
+  local m1CD=S.m1BlockCooldown and S.m1BlockCooldown() or 0.25
+  if (now-lastOwnM1At) < m1CD then return false end
+  if leftClickActive then return false end
+  return true
 end
-task.defer(observeSelf)
-LP.CharacterAdded:Connect(function() task.wait(0.2) observeSelf() end)
 
 -- IDs
 local delayed={ ["rbxassetid://10479335397"]=true, ["rbxassetid://13380255751"]=true, ["rbxassetid://134775406437626"]=true }
@@ -247,17 +241,6 @@ local function counterFire()
   if prey then comm:FireServer({Tool=prey,Goal="Console Move"}) end
   local split=LP.Backpack and LP.Backpack:FindFirstChild("Split Second Counter")
   if split then comm:FireServer({Tool=split,Goal="Console Move"}) end
-end
-
-local function autoblockAllowed()
-  if not (S.detectActive and S.detectActive()) then return false end
-  local now=os.clock()
-  local dashCD=S.dashBlockCooldown and S.dashBlockCooldown() or 0.25
-  if (now-lastDashAt) < dashCD then return false end
-  local m1CD=S.m1BlockCooldown and S.m1BlockCooldown() or 0.25
-  if (now-lastOwnM1At) < m1CD then return false end
-  if leftClickActive then return false end
-  return true
 end
 
 local function scanAndBlock()
@@ -335,4 +318,3 @@ RunService.Heartbeat:Connect(function()
   pcall(scanAndBlock)
   pcall(autoCounterTick)
 end)
--- end snippet 2
