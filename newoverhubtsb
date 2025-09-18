@@ -1,31 +1,53 @@
--- WindUI official loader (releases) + OverHub UI wiring
+-- WindUI release loader (strict) + OverHub UI with hard error reporting
 local Players=game:GetService("Players")
 local UserInputService=game:GetService("UserInputService")
 local TweenService=game:GetService("TweenService")
 local Lighting=game:GetService("Lighting")
 local StarterGui=game:GetService("StarterGui")
 local LP=Players.LocalPlayer
-local PG=LP:WaitForChild("PlayerGui")
 
--- Mirrors + cache for the release asset
+-- 1) Strict WindUI loader with logs
 local URLs={
   "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
   "https://ghproxy.com/https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
   "https://download.fastgit.org/Footagesus/WindUI/releases/latest/download/main.lua"
 }
 getgenv().WindUI_Cache=getgenv().WindUI_Cache or nil
+local function log(...) print("[WindUI]", ...) end
 local function loadWind()
-  if getgenv().WindUI_Cache then local f=loadstring(getgenv().WindUI_Cache) if f then local ok,lib=pcall(f) if ok and type(lib)=="table" then return lib end end end
-  local last
-  for _,u in ipairs(URLs) do local ok,src=pcall(function() return game:HttpGet(u) end)
-    if ok and type(src)=="string" and #src>100 then getgenv().WindUI_Cache=src local f=loadstring(src) if f then local ok2,lib=pcall(f) if ok2 and type(lib)=="table" then return lib end end
-    else last=src end
+  if getgenv().WindUI_Cache then
+    log("Using cached build")
+    local f,lferr=loadstring(getgenv().WindUI_Cache)
+    if not f then error("Cache loadstring failed: "..tostring(lferr)) end
+    local ok,lib=pcall(f)
+    if not ok then error("Cache executed with error: "..tostring(lib)) end
+    if type(lib)~="table" then error("Cache returned non-table") end
+    return lib
   end
-  error("WindUI release load failed: "..tostring(last))
+  local lastErr
+  for _,u in ipairs(URLs) do
+    log("HttpGet ->",u)
+    local ok,src=pcall(function() return game:HttpGet(u) end)
+    if ok and type(src)=="string" and #src>100 then
+      getgenv().WindUI_Cache=src
+      local f,err=loadstring(src)
+      if not f then lastErr="compile error: "..tostring(err) continue end
+      local ok2,lib=pcall(f)
+      if not ok2 then lastErr="exec error: "..tostring(lib) continue end
+      if type(lib)~="table" then lastErr="returned not table" continue end
+      log("Loaded WindUI release")
+      return lib
+    else
+      lastErr=src or "HttpGet failed"
+    end
+  end
+  error("WindUI release load failed: "..tostring(lastErr))
 end
-local WindUI=loadWind()
 
--- Persist
+local WindUI=loadWind()
+assert(type(WindUI.CreateWindow)=="function","WindUI.CreateWindow missing")
+
+-- 2) Persistence
 _G.OverhubSave=_G.OverhubSave or {}
 local uid=tostring(LP.UserId)
 _G.OverhubSave[uid]=_G.OverhubSave[uid] or {}
@@ -38,7 +60,7 @@ def("dashBlockCooldown",0.25); def("m1BlockCooldown",0.25)
 def("fpsBoost",false)
 local function persist() _G.OverhubSave[uid]=SAVE end
 
--- Blur
+-- 3) Blur helpers
 local cam=workspace.CurrentCamera
 local Blur=Instance.new("BlurEffect") Blur.Enabled=false Blur.Size=0 Blur.Parent=cam
 local function setBlur(on)
@@ -46,57 +68,100 @@ local function setBlur(on)
   else TweenService:Create(Blur,TweenInfo.new(0.22),{Size=0}):Play() task.delay(0.24,function() if Blur then Blur.Enabled=false end end) end
 end
 
--- Window
-local Window=WindUI:CreateWindow({Title="OverHub GUI",SubTitle="Autoblock Suite",Size=UDim2.new(0,420,0,300),Theme="Dark",Draggable=true,FastDrag=true,Closable=true})
-Window:OnOpened(function() setBlur(true) end)
-Window:OnClosed(function() setBlur(false) end)
+-- 4) Build UI (wrap each section in pcall to catch any runtime error that would stop rendering)
+local function safe(fn,tag) local ok,err=pcall(fn) if not ok then warn("[OverHub UI error@"..tag.."] "..tostring(err)) end end
 
--- Tabs
-local TabMain=Window:CreateTab({Title="Main",Icon="Shield"})
-local TabSettings=Window:CreateTab({Title="Settings",Icon="Cog"})
-local TabNews=Window:CreateTab({Title="New",Icon="Newspaper"})
-local TabLinks=Window:CreateTab({Title="Links",Icon="Link"})
+local Window
+safe(function()
+  Window=WindUI:CreateWindow({Title="OverHub GUI",SubTitle="Autoblock Suite",Size=UDim2.new(0,420,0,300),Theme="Dark",Draggable=true,FastDrag=true,Closable=true})
+  Window:OnOpened(function() setBlur(true) end)
+  Window:OnClosed(function() setBlur(false) end)
+end,"CreateWindow")
+assert(Window,"Window is nil; WindUI may have changed API")
 
--- Helpers
-local function addToggle(section,label,key,tip) return section:AddToggle({Title=label,Description=tip or "",Default=SAVE[key]==true,Callback=function(v) SAVE[key]=v persist() end}) end
-local function addInput(section,label,key,ph) section:AddInput({Title=label,Placeholder=ph or "",Default=tostring(SAVE[key]),Numeric=true,Callback=function(txt)local n=tonumber(txt) if n then SAVE[key]=n persist() end end}) end
-local function addSlider(section,label,key,min,max,step) section:AddSlider({Title=label,Min=min,Max=max,Default=SAVE[key],Increment=step or 1,Rounding=0,Callback=function(n) SAVE[key]=n persist() end}) end
+local TabMain,TabSettings,TabNews,TabLinks
+safe(function() TabMain=Window:CreateTab({Title="Main",Icon="Shield"}) end,"TabMain")
+safe(function() TabSettings=Window:CreateTab({Title="Settings",Icon="Cog"}) end,"TabSettings")
+safe(function() TabNews=Window:CreateTab({Title="New",Icon="Newspaper"}) end,"TabNews")
+safe(function() TabLinks=Window:CreateTab({Title="Links",Icon="Link"}) end,"TabLinks")
+
+local function addToggle(section,label,key,tip)
+  return section:AddToggle({Title=label,Description=tip or "",Default=SAVE[key]==true,Callback=function(v) SAVE[key]=v persist() end})
+end
+local function addInput(section,label,key,ph)
+  section:AddInput({Title=label,Placeholder=ph or "",Default=tostring(SAVE[key]),Numeric=true,Callback=function(txt)local n=tonumber(txt) if n then SAVE[key]=n persist() end end})
+end
+local function addSlider(section,label,key,min,max,step)
+  section:AddSlider({Title=label,Min=min,Max=max,Default=SAVE[key],Increment=step or 1,Rounding=0,Callback=function(n) SAVE[key]=n persist() end})
+end
 local function addButton(section,label,cb) section:AddButton({Title=label,Callback=cb}) end
 local function addParagraph(section,title,content) return section:AddParagraph({Title=title,Content=content}) end
 
--- Main
-local S1=TabMain:CreateSection({Title="Status"})
-local statusPara=addParagraph(S1,"AUTOBLOCK", SAVE.detect and "ON" or "OFF")
-local function refreshStatus() statusPara:SetContent(SAVE.detect and "ON" or "OFF") end
-local S2=TabMain:CreateSection({Title="Toggles"})
-local tDetect=addToggle(S2,"Auto Block","detect"); tDetect:OnChanged(refreshStatus)
-addToggle(S2,"M1 After Block","m1After")
-addToggle(S2,"M1 Dodge","m1Catch")
-addToggle(S2,"Camlock Toggle","camlock")
-addToggle(S2,"Auto Counter","autoCounter")
-addToggle(S2,"No Endlag (M1 Reset)","noEndlag")
+-- Sections and controls
+safe(function()
+  local S1=TabMain:CreateSection({Title="Status"})
+  local statusPara=addParagraph(S1,"AUTOBLOCK", SAVE.detect and "ON" or "OFF")
+  local function refreshStatus() statusPara:SetContent(SAVE.detect and "ON" or "OFF") end
+  local S2=TabMain:CreateSection({Title="Toggles"})
+  local tDetect=addToggle(S2,"Auto Block","detect"); tDetect:OnChanged(refreshStatus)
+  addToggle(S2,"M1 After Block","m1After")
+  addToggle(S2,"M1 Dodge","m1Catch")
+  addToggle(S2,"Camlock Toggle","camlock")
+  addToggle(S2,"Auto Counter","autoCounter")
+  addToggle(S2,"No Endlag (M1 Reset)","noEndlag")
+end,"MainControls")
 
--- Settings
-local SR=TabSettings:CreateSection({Title="Ranges"})
-addInput(SR,"M1 Range","normal","1"); addInput(SR,"Special Range","special","50"); addInput(SR,"Skill Range","skill","50"); addInput(SR,"Skill Hold","hold","1.2")
-local SC=TabSettings:CreateSection({Title="Auto Counter"}); addSlider(SC,"Counter Distance","counterRange",5,30,1)
-local SG=TabSettings:CreateSection({Title="Blocking Gates"}); addInput(SG,"Dash Block CD","dashBlockCooldown","0.25"); addInput(SG,"M1 Block CD","m1BlockCooldown","0.25")
-local SP=TabSettings:CreateSection({Title="Performance"})
-local tFPS=addToggle(SP,"FPS Boost","fpsBoost","Disable effects/particles/shadows to reduce lag")
-tFPS:OnChanged(function(v) SAVE.fpsBoost=v persist() if _G.__OverhubFPS then _G.__OverhubFPS(v) end end)
+safe(function()
+  local SR=TabSettings:CreateSection({Title="Ranges"})
+  addInput(SR,"M1 Range","normal","1")
+  addInput(SR,"Special Range","special","50")
+  addInput(SR,"Skill Range","skill","50")
+  addInput(SR,"Skill Hold","hold","1.2")
 
--- Repo link copy
-local L1=TabLinks:CreateSection({Title="Repository"})
-addButton(L1,"Copy WindUI Repo",function() local u="https://github.com/Footagesus/WindUI.git" if setclipboard then pcall(setclipboard,u) else StarterGui:SetCore("SetClipboard",u) end end)
+  local SC=TabSettings:CreateSection({Title="Auto Counter"})
+  addSlider(SC,"Counter Distance","counterRange",5,30,1)
 
--- Export for logic
+  local SG=TabSettings:CreateSection({Title="Blocking Gates"})
+  addInput(SG,"Dash Block CD","dashBlockCooldown","0.25")
+  addInput(SG,"M1 Block CD","m1BlockCooldown","0.25")
+
+  local SP=TabSettings:CreateSection({Title="Performance"})
+  local tFPS=addToggle(SP,"FPS Boost","fpsBoost","Disable effects/particles/shadows to reduce lag")
+  tFPS:OnChanged(function(v) SAVE.fpsBoost=v persist() if _G.__OverhubFPS then _G.__OverhubFPS(v) end end)
+
+  local N1=TabNews:CreateSection({Title="Changelog"})
+  addParagraph(N1,"v4.x","WindUI release build; added strict errors")
+
+  local L1=TabLinks:CreateSection({Title="Repository"})
+  addButton(L1,"Copy WindUI Repo",function() local u="https://github.com/Footagesus/WindUI.git" if setclipboard then pcall(setclipboard,u) else StarterGui:SetCore("SetClipboard",u) end end)
+end,"OtherControls")
+
+-- FPS boost controller
+_G.__OverhubFPS=function(enabled)
+  pcall(function()
+    if enabled then
+      settings().Rendering.QualityLevel=Enum.QualityLevel.Level01
+      settings().Rendering.MeshPartDetailLevel=Enum.MeshPartDetailLevel.Level01
+      workspace.StreamingEnabled=true workspace.StreamingMinRadius=32 workspace.StreamingTargetRadius=64
+      if workspace:FindFirstChildOfClass("Terrain") then workspace.Terrain.Decoration=false end
+      for _,ins in ipairs(Lighting:GetChildren()) do if ins:IsA("PostEffect") then ins.Enabled=false end end
+      for _,d in ipairs(workspace:GetDescendants()) do if d:IsA("ParticleEmitter") or d:IsA("Trail") then d.Enabled=false end if d:IsA("BasePart") then d.CastShadow=false end end
+    else
+      for _,ins in ipairs(Lighting:GetChildren()) do if ins:IsA("PostEffect") then ins.Enabled=true end end
+      for _,d in ipairs(workspace:GetDescendants()) do if d:IsA("ParticleEmitter") or d:IsA("Trail") then d.Enabled=true end if d:IsA("BasePart") then d.CastShadow=true end end
+    end
+  end)
+end
+
+-- Export state for logic
 _G.OverhubUI={Window=Window,State={
   normalRange=function() return SAVE.normal end,specialRange=function() return SAVE.special end,skillRange=function() return SAVE.skill end,skillDelay=function() return SAVE.hold end,
   detectActive=function() return SAVE.detect end,m1After=function() return SAVE.m1After end,m1Catch=function() return SAVE.m1Catch end,camlock=function() return SAVE.camlock end,
   autoCounter=function() return SAVE.autoCounter end,counterRange=function() return SAVE.counterRange end,noEndlag=function() return SAVE.noEndlag end,
   dashBlockCooldown=function() return SAVE.dashBlockCooldown end,m1BlockCooldown=function() return SAVE.m1BlockCooldown end,fpsBoost=function() return SAVE.fpsBoost end
 }, _save=SAVE}
--- OverHub Logic (unchanged features; driven by WindUI state)
+print("[OverHub] WindUI UI constructed")
+-- OverHub Logic (unchanged; uses _G.OverhubUI.State)
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UserInputService=game:GetService("UserInputService")
