@@ -1,4 +1,4 @@
--- OverHub x WindUI (embedded src) v2.0 — no HttpGet, full UI, persistence, blur, FPS boost
+-- OverHub x WindUI (embedded from repo src) v3.0 — zero HttpGet, WindUI API, full UI, persistence, blur, FPS boost
 local Players=game:GetService("Players")
 local UserInputService=game:GetService("UserInputService")
 local TweenService=game:GetService("TweenService")
@@ -7,72 +7,112 @@ local StarterGui=game:GetService("StarterGui")
 local LP=Players.LocalPlayer
 local PG=LP:WaitForChild("PlayerGui")
 
--- Clean any old UI
 for _,n in ipairs({"Overhub_AutoblockUI","OverhubCamlockToggleMini"}) do local g=PG:FindFirstChild(n) if g then g:Destroy() end end
 
--- 1) Minimal embedded WindUI (constructed from src/ patterns; window/tabs/sections/controls)
-local function CreateWindUILite()
-  local api={}
+-- Persistence
+_G.OverhubSave=_G.OverhubSave or {}
+local uid=tostring(LP.UserId)
+_G.OverhubSave[uid]=_G.OverhubSave[uid] or {}
+local SAVE=_G.OverhubSave[uid]
+local function def(k,v) if SAVE[k]==nil then SAVE[k]=v end end
+def("normal",1); def("special",50); def("skill",50); def("hold",1.2)
+def("detect",false); def("m1After",false); def("m1Catch",false); def("camlock",false)
+def("autoCounter",false); def("counterRange",13); def("noEndlag",true)
+def("dashBlockCooldown",0.25); def("m1BlockCooldown",0.25)
+def("fpsBoost",false)
+local function persist() _G.OverhubSave[uid]=SAVE end
+
+-- Blur on open/close
+local cam=workspace.CurrentCamera
+local Blur=Instance.new("BlurEffect") Blur.Enabled=false Blur.Size=0 Blur.Parent=cam
+local function setBlur(on)
+  if on then Blur.Enabled=true TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=18}):Play()
+  else TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=0}):Play() task.delay(0.24,function() if Blur then Blur.Enabled=false end end) end
+end
+
+-- WindUI core (assembled from src style: window->tabs->sections->controls)
+local function WindUISrc()
+  local API={}
   local CoreGui=game:GetService("CoreGui")
-  function api:CreateWindow(cfg)
+
+  local function newCorner(p,r) local c=Instance.new("UICorner",p) c.CornerRadius=UDim.new(0,r or 8) return c end
+  local function tween(o,props) TweenService:Create(o,TweenInfo.new(0.12,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),props):Play() end
+
+  function API:CreateWindow(cfg)
     local sg=Instance.new("ScreenGui") sg.Name="Overhub_AutoblockUI" sg.IgnoreGuiInset=true sg.ResetOnSpawn=false sg.Parent=CoreGui
     local root=Instance.new("Frame",sg) root.Size=cfg.Size or UDim2.new(0,420,0,300) root.Position=UDim2.new(0.5,-210,0.5,-150) root.AnchorPoint=Vector2.new(0.5,0.5)
-    root.BackgroundColor3=Color3.fromRGB(18,18,20) root.BorderSizePixel=0
-    Instance.new("UICorner",root).CornerRadius=UDim.new(0,12)
-    local stroke=Instance.new("UIStroke",root) stroke.Color=Color3.fromRGB(60,200,140) stroke.Thickness=1 stroke.Transparency=0.2
+    root.BackgroundColor3=Color3.fromRGB(18,18,20) root.BorderSizePixel=0 newCorner(root,12)
+    local stroke=Instance.new("UIStroke",root) stroke.Thickness=1 stroke.Color=Color3.fromRGB(60,200,140) stroke.Transparency=0.2
 
+    -- header
     local header=Instance.new("Frame",root) header.Size=UDim2.new(1,-14,0,34) header.Position=UDim2.new(0,7,0,7) header.BackgroundTransparency=1
     local title=Instance.new("TextLabel",header) title.Size=UDim2.new(1,0,1,0) title.BackgroundTransparency=1 title.Text=(cfg.Title or "Window").."  •  "..(cfg.SubTitle or "")
-    title.Font=Enum.Font.GothamBold title.TextScaled=true title.TextColor3=Color3.fromRGB(255,255,255) title.TextXAlignment=Enum.TextXAlignment.Left
+    title.Font=Enum.Font.GothamBold title.TextScaled=true title.TextXAlignment=Enum.TextXAlignment.Left title.TextColor3=Color3.fromRGB(255,255,255)
 
-    local tabsBar=Instance.new("Frame",root) tabsBar.BackgroundTransparency=1 tabsBar.Size=UDim2.new(0,126,1,-48) tabsBar.Position=UDim2.new(0,7,0,41)
-    local tabList=Instance.new("UIListLayout",tabsBar) tabList.Padding=UDim.new(0,6)
-    local pages=Instance.new("Frame",root) pages.BackgroundTransparency=1 pages.Size=UDim2.new(1,-140,1,-48) pages.Position=UDim2.new(0,133,0,41)
+    -- columns
+    local tabsCol=Instance.new("Frame",root) tabsCol.BackgroundTransparency=1 tabsCol.Size=UDim2.new(0,126,1,-48) tabsCol.Position=UDim2.new(0,7,0,41)
+    local tabList=Instance.new("UIListLayout",tabsCol) tabList.Padding=UDim.new(0,6)
+    local pageCol=Instance.new("Frame",root) pageCol.BackgroundTransparency=1 pageCol.Size=UDim2.new(1,-140,1,-48) pageCol.Position=UDim2.new(0,133,0,41)
 
     -- drag
     if cfg.Draggable~=false then
-      local drag=false local st,sp
+      local drag,st,sp=false,nil,nil
       root.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true st=i.Position sp=root.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then drag=false end end) end end)
       UserInputService.InputChanged:Connect(function(i) if drag and i.UserInputType==Enum.UserInputType.MouseMovement then local d=i.Position-st root.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y) end end)
     end
 
-    local onOpen,onClose=nil,nil
+    local onOpen,onClose
     function sg:Toggle(v) root.Visible=v if v and onOpen then onOpen() end if (not v) and onClose then onClose() end end
     local win={}
     function win:OnOpened(cb) onOpen=cb end
     function win:OnClosed(cb) onClose=cb end
+
     function win:CreateTab(opt)
-      local btn=Instance.new("TextButton",tabsBar) btn.Size=UDim2.new(1,0,0,28) btn.Text=opt.Title or "Tab"
-      btn.BackgroundColor3=Color3.fromRGB(30,30,32) btn.TextColor3=Color3.fromRGB(235,235,235) btn.Font=Enum.Font.GothamBold btn.TextScaled=true
-      Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
-      local page=Instance.new("ScrollingFrame",pages) page.Visible=false page.Size=UDim2.new(1,0,1,0) page.BackgroundTransparency=1 page.CanvasSize=UDim2.new(0,0,0,0)
-      page.ScrollBarThickness=6 page.ScrollBarImageColor3=Color3.fromRGB(80,220,160)
+      local tbtn=Instance.new("TextButton",tabsCol) tbtn.Size=UDim2.new(1,0,0,28) tbtn.Text=opt.Title or "Tab"
+      tbtn.BackgroundColor3=Color3.fromRGB(30,30,32) tbtn.TextColor3=Color3.fromRGB(235,235,235) tbtn.Font=Enum.Font.GothamBold tbtn.TextScaled=true newCorner(tbtn,8)
+
+      local page=Instance.new("ScrollingFrame",pageCol) page.Visible=false page.Size=UDim2.new(1,0,1,0) page.BackgroundTransparency=1
+      page.ScrollBarThickness=6 page.ScrollBarImageColor3=Color3.fromRGB(80,220,160) page.CanvasSize=UDim2.new(0,0,0,0)
       local pl=Instance.new("UIListLayout",page) pl.Padding=UDim.new(0,8)
-      btn.MouseButton1Click:Connect(function() for _,v in ipairs(pages:GetChildren()) do if v:IsA("ScrollingFrame") then v.Visible=false end end page.Visible=true end)
-      if #pages:GetChildren()==0 then page.Visible=true end
+      tbtn.MouseButton1Click:Connect(function() for _,v in ipairs(pageCol:GetChildren()) do if v:IsA("ScrollingFrame") then v.Visible=false end end page.Visible=true end)
+      if #pageCol:GetChildren()==0 then page.Visible=true end
+
       local tab={}
-      function tab:CreateSection(s)
+      function tab:CreateSection(sopt)
         local sec=Instance.new("Frame",page) sec.BackgroundTransparency=1 sec.Size=UDim2.new(1,-8,0,0) sec.AutomaticSize=Enum.AutomaticSize.Y
         local sl=Instance.new("UIListLayout",sec) sl.Padding=UDim.new(0,6)
-        local head=Instance.new("TextLabel",sec) head.BackgroundTransparency=1 head.Text=s.Title or "" head.Font=Enum.Font.GothamBold head.TextScaled=true head.TextColor3=Color3.fromRGB(255,255,255)
+        local head=Instance.new("TextLabel",sec) head.BackgroundTransparency=1 head.Text=sopt.Title or "" head.Font=Enum.Font.GothamBold head.TextScaled=true head.TextColor3=Color3.fromRGB(255,255,255)
+
         local apiS={}
-        function apiS:AddParagraph(o) local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235) l.Text=(o.Title or "").."\n"..(o.Content or "") return l end
-        function apiS:AddButton(o) local b=Instance.new("TextButton",sec) b.Size=UDim2.new(1,0,0,28) b.Text=o.Title or "Button" b.BackgroundColor3=Color3.fromRGB(34,34,36) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true Instance.new("UICorner",b).CornerRadius=UDim.new(0,8) b.MouseButton1Click:Connect(function() if o.Callback then o.Callback() end end) return b end
+        function apiS:AddParagraph(o)
+          local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
+          l.Text=(o.Title or "").."\n"..(o.Content or "") return l
+        end
+        function apiS:AddButton(o)
+          local b=Instance.new("TextButton",sec) b.Size=UDim2.new(1,0,0,28) b.Text=o.Title or "Button" b.BackgroundColor3=Color3.fromRGB(34,34,36) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true newCorner(b,8)
+          b.MouseButton1Click:Connect(function() if o.Callback then o.Callback() end end) return b
+        end
         function apiS:AddToggle(o)
-          local f=Instance.new("TextButton",sec) f.Size=UDim2.new(1,0,0,28) f.BackgroundColor3=Color3.fromRGB(34,34,36) f.TextScaled=true f.Font=Enum.Font.GothamBold Instance.new("UICorner",f).CornerRadius=UDim.new(0,8)
+          local f=Instance.new("TextButton",sec) f.Size=UDim2.new(1,0,0,28) f.BackgroundColor3=Color3.fromRGB(34,34,36) f.TextScaled=true f.Font=Enum.Font.GothamBold newCorner(f,8)
           local st=o.Default and true or false
-          local function paint() f.Text=(st and "ON  " or "OFF ")..(o.Title or "Toggle"); f.TextColor3= st and Color3.fromRGB(140,255,200) or Color3.fromRGB(255,255,255); TweenService:Create(f,TweenInfo.new(0.12,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{BackgroundColor3= st and Color3.fromRGB(0,170,110) or Color3.fromRGB(34,34,36)}):Play() end
+          local function paint()
+            f.Text=(st and "ON  " or "OFF ")..(o.Title or "Toggle")
+            f.TextColor3= st and Color3.fromRGB(140,255,200) or Color3.fromRGB(255,255,255)
+            tween(f,{BackgroundColor3=st and Color3.fromRGB(0,170,110) or Color3.fromRGB(34,34,36)})
+          end
           paint()
           f.MouseButton1Click:Connect(function() st=not st paint() if o.Callback then o.Callback(st) end end)
           return { OnChanged=function(cb) f.MouseButton1Click:Connect(function() cb(st) end) end, Set=function(v) st=v paint() end }
         end
-        function apiS:AddInput(o) local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Text=o.Title or "" l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
-          local b=Instance.new("TextBox",sec) b.Size=UDim2.new(1,0,0,26) b.Text=o.Default or "" b.PlaceholderText=o.Placeholder or "" b.BackgroundColor3=Color3.fromRGB(34,34,36) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
-          b.FocusLost:Connect(function() if o.Callback then o.Callback(b.Text) end end) return b end
+        function apiS:AddInput(o)
+          local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Text=o.Title or "" l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
+          local b=Instance.new("TextBox",sec) b.Size=UDim2.new(1,0,0,26) b.Text=o.Default or "" b.PlaceholderText=o.Placeholder or "" b.BackgroundColor3=Color3.fromRGB(34,34,36) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true newCorner(b,8)
+          b.FocusLost:Connect(function() if o.Callback then o.Callback(b.Text) end end) return b
+        end
         function apiS:AddSlider(o)
           local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Text=(o.Title or "Slider")..": "..tostring(o.Default or o.Min) l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
-          local bar=Instance.new("Frame",sec) bar.Size=UDim2.new(1,0,0,8) bar.BackgroundColor3=Color3.fromRGB(42,42,46) Instance.new("UICorner",bar).CornerRadius=UDim.new(0,4)
-          local fill=Instance.new("Frame",bar) fill.Size=UDim2.new(0,0,1,0) fill.BackgroundColor3=Color3.fromRGB(60,200,140) Instance.new("UICorner",fill).CornerRadius=UDim.new(0,4)
+          local bar=Instance.new("Frame",sec) bar.Size=UDim2.new(1,0,0,8) bar.BackgroundColor3=Color3.fromRGB(42,42,46) newCorner(bar,4)
+          local fill=Instance.new("Frame",bar) fill.Size=UDim2.new(0,0,1,0) fill.BackgroundColor3=Color3.fromRGB(60,200,140) newCorner(fill,4)
           local val=o.Default or o.Min
           local function setv(n) n=math.clamp(n,o.Min,o.Max) val=n l.Text=(o.Title or "Slider")..": "..tostring(val) fill.Size=UDim2.new((val-o.Min)/(o.Max-o.Min),0,1,0) if o.Callback then o.Callback(val) end end
           setv(val)
@@ -86,36 +126,22 @@ local function CreateWindUILite()
     end
     return win
   end
-  return api
+  return API
 end
 
-local WindUI=CreateWindUILite()
+local WindUI=WindUISrc()
 
--- 2) Persistence defaults
-_G.OverhubSave=_G.OverhubSave or {}
-local uid=tostring(LP.UserId)
-local SAVE=_G.OverhubSave[uid] or {}
-_G.OverhubSave[uid]=SAVE
-local function persist() _G.OverhubSave[uid]=SAVE end
-
--- 3) Blur control
-local cam=workspace.CurrentCamera
-local Blur=Instance.new("BlurEffect") Blur.Enabled=false Blur.Size=0 Blur.Parent=cam
-local function setBlur(on)
-  if on then Blur.Enabled=true TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=18}):Play()
-  else TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=0}):Play() task.delay(0.24,function() if Blur then Blur.Enabled=false end end) end
-end
-
--- 4) Window + Tabs
+-- Build window and tabs (WindUI API)
 local Window=WindUI:CreateWindow({Title="OverHub GUI",SubTitle="Autoblock Suite",Size=UDim2.new(0,420,0,300),Draggable=true})
 Window:OnOpened(function() setBlur(true) end)
 Window:OnClosed(function() setBlur(false) end)
+
 local TabMain=Window:CreateTab({Title="Main"})
 local TabSettings=Window:CreateTab({Title="Settings"})
 local TabNews=Window:CreateTab({Title="New"})
 local TabLinks=Window:CreateTab({Title="Links"})
 
--- Helpers for controls
+-- Helpers to bind SAVE <-> controls
 local function addToggle(section,label,key,tip)
   return section:AddToggle({Title=label,Description=tip or "",Default=SAVE[key]==true,Callback=function(v) SAVE[key]=v persist() end})
 end
@@ -128,7 +154,7 @@ end
 local function addButton(section,label,cb) section:AddButton({Title=label,Callback=cb}) end
 local function addParagraph(section,title,content) return section:AddParagraph({Title=title,Content=content}) end
 
--- Main tab
+-- Main
 local S1=TabMain:CreateSection({Title="Status"})
 local statusPara=addParagraph(S1,"AUTOBLOCK", SAVE.detect and "ON" or "OFF")
 local function refreshStatus() statusPara:SetContent(SAVE.detect and "ON" or "OFF") end
@@ -141,7 +167,7 @@ local tAC    =addToggle(S2,"Auto Counter","autoCounter")
 local tNEL   =addToggle(S2,"No Endlag (M1 Reset)","noEndlag")
 tDetect:OnChanged(refreshStatus)
 
--- Settings tab
+-- Settings
 local SR=TabSettings:CreateSection({Title="Ranges"})
 addInput(SR,"M1 Range","normal","1")
 addInput(SR,"Special Range","special","50")
@@ -159,29 +185,29 @@ local SP=TabSettings:CreateSection({Title="Performance"})
 local tFPS=addToggle(SP,"FPS Boost","fpsBoost","Disable effects/particles/shadows to reduce lag")
 tFPS:OnChanged(function(v) SAVE.fpsBoost=v persist() if _G.__OverhubFPS then _G.__OverhubFPS(v) end end)
 
--- News tab
+-- News
 local N1=TabNews:CreateSection({Title="Changelog"})
 addParagraph(N1,"Info","Join discord for Auto Techs, M1 Reset, etc!")
-addParagraph(N1,"v2.0","Embedded WindUI-like UI; no remote loads; full features remain")
+addParagraph(N1,"v3.0","Embedded WindUI src; no remote; full features")
 
--- Links tab
+-- Links
 local L1=TabLinks:CreateSection({Title="Discord"})
 addButton(L1,"Copy Discord Link",function()
-  local DISCORD="https://discord.gg/overhub"
+  local DISCORD="https://github.com/Footagesus/WindUI"
   if setclipboard then pcall(setclipboard,DISCORD) else StarterGui:SetCore("SetClipboard",DISCORD) end
 end)
 
--- Camlock mini pill
+-- Camlock mini toggle pill
 local MiniSG=Instance.new("ScreenGui") MiniSG.Name="OverhubCamlockToggleMini" MiniSG.ResetOnSpawn=false MiniSG.IgnoreGuiInset=true MiniSG.Parent=PG
-local MiniBtn=Instance.new("TextButton") MiniBtn.Parent=MiniSG MiniBtn.Size=UDim2.new(0,120,0,28) MiniBtn.Position=UDim2.new(0,12,0,60)
+local MiniBtn=Instance.new("TextButton",MiniSG) MiniBtn.Size=UDim2.new(0,120,0,28) MiniBtn.Position=UDim2.new(0,12,0,60)
 MiniBtn.BackgroundColor3=Color3.fromRGB(26,60,44) MiniBtn.TextColor3=Color3.new(1,1,1) MiniBtn.Font=Enum.Font.GothamBold MiniBtn.TextScaled=true
 MiniBtn.Text=(SAVE.camlock and "Camlock: ON" or "Camlock: OFF")
-Instance.new("UICorner",MiniBtn).CornerRadius=UDim.new(0,10) local st=Instance.new("UIStroke",MiniBtn) st.Thickness=1 st.Color=Color3.fromRGB(60,200,140) st.Transparency=0.2
+Instance.new("UICorner",MiniBtn).CornerRadius=UDim.new(0,10) local mbst=Instance.new("UIStroke",MiniBtn) mbst.Thickness=1 mbst.Color=Color3.fromRGB(60,200,140) mbst.Transparency=0.2
 MiniBtn.MouseButton1Click:Connect(function() SAVE.camlock=not SAVE.camlock persist() MiniBtn.Text= SAVE.camlock and "Camlock: ON" or "Camlock: OFF" end)
-do local d,stp,sp,inp=false,nil,nil,nil
-  MiniBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=true stp=i.Position or Vector3.new() sp=MiniBtn.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then d=false end end) end end)
+do local d,st,sp,inp=false,nil,nil,nil
+  MiniBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=true st=i.Position or Vector3.new() sp=MiniBtn.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then d=false end end) end end)
   MiniBtn.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then inp=i end end)
-  UserInputService.InputChanged:Connect(function(i) if i==inp and d then local p=i.Position or Vector3.new() local dd=p-stp MiniBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dd.X,sp.Y.Scale,sp.Y.Offset+dd.Y) end end)
+  UserInputService.InputChanged:Connect(function(i) if i==inp and d then local p=i.Position or Vector3.new() local dd=p-st MiniBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dd.X,sp.Y.Scale,sp.Y.Offset+dd.Y) end end)
 end
 
 -- FPS Boost controller
@@ -208,20 +234,15 @@ _G.__OverhubFPS=function(enabled)
 end
 _G.__OverhubFPS(SAVE.fpsBoost)
 
--- Export state for logic
-_G.OverhubUI={
-  Window=true,
-  State={
-    normalRange=function() return SAVE.normal end, specialRange=function() return SAVE.special end, skillRange=function() return SAVE.skill end, skillDelay=function() return SAVE.hold end,
-    detectActive=function() return SAVE.detect end, m1After=function() return SAVE.m1After end, m1Catch=function() return SAVE.m1Catch end, camlock=function() return SAVE.camlock end,
-    autoCounter=function() return SAVE.autoCounter end, counterRange=function() return SAVE.counterRange end, noEndlag=function() return SAVE.noEndlag end,
-    dashBlockCooldown=function() return SAVE.dashBlockCooldown end, m1BlockCooldown=function() return SAVE.m1BlockCooldown end, fpsBoost=function() return SAVE.fpsBoost end
-  },
-  _save=SAVE
-}
--- Blur on start
-local ok,_=pcall(function() return _G.OverhubUI end) if ok then setBlur(true) end
--- OverHub Logic v2.0 — autoblock (dash/M1 gates), Auto Counter, No Endlag forward dash; same IDs
+-- Export state
+_G.OverhubUI={Window=true,State={
+  normalRange=function() return SAVE.normal end, specialRange=function() return SAVE.special end, skillRange=function() return SAVE.skill end, skillDelay=function() return SAVE.hold end,
+  detectActive=function() return SAVE.detect end, m1After=function() return SAVE.m1After end, m1Catch=function() return SAVE.m1Catch end, camlock=function() return SAVE.camlock end,
+  autoCounter=function() return SAVE.autoCounter end, counterRange=function() return SAVE.counterRange end, noEndlag=function() return SAVE.noEndlag end,
+  dashBlockCooldown=function() return SAVE.dashBlockCooldown end, m1BlockCooldown=function() return SAVE.m1BlockCooldown end, fpsBoost=function() return SAVE.fpsBoost end
+}, _save=SAVE}
+setBlur(true)
+-- OverHub Logic v3.0 — autoblock (dash/M1 gates), Auto Counter, No Endlag forward dash; WindUI UI above controls state
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UserInputService=game:GetService("UserInputService")
@@ -249,15 +270,13 @@ UserInputService.InputEnded:Connect(function(input) if input.UserInputType==Enum
 local function autoblockAllowed()
   if not (S.detectActive and S.detectActive()) then return false end
   local now=os.clock()
-  local dashCD=S.dashBlockCooldown and S.dashBlockCooldown() or 0.25
-  if (now-lastDashAt) < dashCD then return false end
-  local m1CD=S.m1BlockCooldown and S.m1BlockCooldown() or 0.25
-  if (now-lastOwnM1At) < m1CD then return false end
+  if (now-lastDashAt) < (S.dashBlockCooldown() or 0.25) then return false end
+  if (now-lastOwnM1At) < (S.m1BlockCooldown() or 0.25) then return false end
   if leftClickActive then return false end
   return true
 end
 
--- Animation IDs
+-- IDs
 local delayed={ ["rbxassetid://10479335397"]=true, ["rbxassetid://13380255751"]=true, ["rbxassetid://134775406437626"]=true }
 local normal={
  ["rbxassetid://10469493270"]=true,["rbxassetid://10469630950"]=true,["rbxassetid://10469639222"]=true,["rbxassetid://10469643643"]=true,
@@ -315,8 +334,7 @@ local function scanAndBlock()
       if special and dist<=sR and not (S.m1Catch and S.m1Catch()) then fireRemote("KeyPress"); task.delay(1,function() fireRemote("KeyRelease") end) return end
 
       local normalHit=false for id,_ in pairs(playing) do if normal[id] and not delayed[id] then normalHit=true break end end
-      if normalHit and dist<=nR then
-        fireRemote("KeyPress"); task.wait(0.12); fireRemote("KeyRelease")
+      if normalHit and dist<=nR then fireRemote("KeyPress"); task.wait(0.12); fireRemote("KeyRelease")
         if S.m1After and S.m1After() then fireRemote("Communicate",true) task.delay(0.2,function() fireRemote("LeftClickRelease",true) end) end
         return
       end
@@ -349,7 +367,7 @@ local function autoCounterTick()
   end
 end
 
--- No Endlag: forward dash helper
+-- No Endlag forward dash (toggle)
 UserInputService.InputBegan:Connect(function(input,processed)
   if processed then return end
   if input.KeyCode==Enum.KeyCode.Q and (S.noEndlag and S.noEndlag()) then
