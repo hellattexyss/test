@@ -1,4 +1,4 @@
--- OverHub Embedded UI v1.0 (no HTTP, no external libs) — draggable, blur, animated toggles, FPS Boost, persistence
+-- OverHub Embedded UI v1.1 (no HTTP, full tabs populated, draggable, blur, animated toggles, FPS boost, persistence)
 local Players=game:GetService("Players")
 local TweenService=game:GetService("TweenService")
 local Lighting=game:GetService("Lighting")
@@ -7,10 +7,8 @@ local StarterGui=game:GetService("StarterGui")
 local LP=Players.LocalPlayer
 local PG=LP:WaitForChild("PlayerGui")
 
--- Clear old
 for _,n in ipairs({"Overhub_AutoblockUI","OverhubCamlockToggleMini"}) do local f=PG:FindFirstChild(n) if f then f:Destroy() end end
 
--- Persistence defaults
 _G.OverhubSave=_G.OverhubSave or {}
 local uid=tostring(LP.UserId)
 _G.OverhubSave[uid]=_G.OverhubSave[uid] or {}
@@ -27,167 +25,128 @@ local function persist() _G.OverhubSave[uid]=SAVE end
 local cam=workspace.CurrentCamera
 local Blur=Instance.new("BlurEffect") Blur.Enabled=false Blur.Size=0 Blur.Parent=cam
 local function setBlur(on)
-    if on then Blur.Enabled=true TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=18}):Play()
-    else TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=0}):Play() task.delay(0.24,function() if Blur then Blur.Enabled=false end end) end
+  if on then Blur.Enabled=true TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=18}):Play()
+  else TweenService:Create(Blur,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=0}):Play() task.delay(0.24,function() if Blur then Blur.Enabled=false end end) end
 end
 
--- Tiny UI framework (local)
-local UI={} do
-  local CoreGui=game:GetService("CoreGui")
-  function UI.Window(opt)
-    local sg=Instance.new("ScreenGui") sg.Name="Overhub_AutoblockUI" sg.IgnoreGuiInset=true sg.ResetOnSpawn=false sg.Parent=CoreGui
-    local root=Instance.new("Frame",sg) root.Size=opt.Size or UDim2.new(0,420,0,300) root.Position=UDim2.new(0.5,-210,0.5,-150) root.AnchorPoint=Vector2.new(0.5,0.5)
-    root.BackgroundColor3=Color3.fromRGB(22,22,22) root.BorderSizePixel=0
-    local corner=Instance.new("UICorner",root) corner.CornerRadius=UDim.new(0,12)
-    local stroke=Instance.new("UIStroke",root) stroke.Thickness=1 stroke.Color=Color3.fromRGB(60,200,140) stroke.Transparency=0.2
+-- Minimal local UI toolkit (tabs/sections/populated)
+local CoreGui=game:GetService("CoreGui")
+local SG=Instance.new("ScreenGui") SG.Name="Overhub_AutoblockUI" SG.IgnoreGuiInset=true SG.ResetOnSpawn=false SG.Parent=CoreGui
+local Root=Instance.new("Frame",SG) Root.Size=UDim2.new(0,420,0,300) Root.Position=UDim2.new(0.5,-210,0.5,-150) Root.AnchorPoint=Vector2.new(0.5,0.5)
+Root.BackgroundColor3=Color3.fromRGB(22,22,22) Root.BorderSizePixel=0
+Instance.new("UICorner",Root).CornerRadius=UDim.new(0,12) local rs=Instance.new("UIStroke",Root) rs.Thickness=1 rs.Color=Color3.fromRGB(60,200,140) rs.Transparency=0.2
 
-    local header=Instance.new("Frame",root) header.BackgroundTransparency=1 header.Size=UDim2.new(1,-14,0,34) header.Position=UDim2.new(0,7,0,7)
-    local title=Instance.new("TextLabel",header) title.BackgroundTransparency=1 title.Size=UDim2.new(0.6,0,1,0) title.Text=(opt.Title or "OverHub GUI").."  "..(opt.SubTitle or "")
-    title.Font=Enum.Font.GothamBold title.TextScaled=true title.TextColor3=Color3.fromRGB(255,255,255) title.TextXAlignment=Enum.TextXAlignment.Left
+local Header=Instance.new("Frame",Root) Header.BackgroundTransparency=1 Header.Size=UDim2.new(1,-14,0,34) Header.Position=UDim2.new(0,7,0,7)
+local Title=Instance.new("TextLabel",Header) Title.BackgroundTransparency=1 Title.Size=UDim2.new(1,0,1,0) Title.Text="OverHub GUI  •  Autoblock Suite"
+Title.Font=Enum.Font.GothamBold Title.TextScaled=true Title.TextColor3=Color3.fromRGB(255,255,255) Title.TextXAlignment=Enum.TextXAlignment.Left
 
-    local tabsBar=Instance.new("Frame",root) tabsBar.BackgroundTransparency=1 tabsBar.Size=UDim2.new(0,122,1,-48) tabsBar.Position=UDim2.new(0,7,0,41)
-    local pages=Instance.new("Frame",root) pages.BackgroundTransparency=1 pages.Size=UDim2.new(1,-136,1,-48) pages.Position=UDim2.new(0,129,0,41)
-    local list=Instance.new("UIListLayout",tabsBar) list.Padding=UDim.new(0,6)
+local Tabs=Instance.new("Frame",Root) Tabs.BackgroundTransparency=1 Tabs.Size=UDim2.new(0,130,1,-48) Tabs.Position=UDim2.new(0,7,0,41)
+local TabList=Instance.new("UIListLayout",Tabs) TabList.Padding=UDim.new(0,6)
+local Pages=Instance.new("Frame",Root) Pages.BackgroundTransparency=1 Pages.Size=UDim2.new(1,-144,1,-48) Pages.Position=UDim2.new(0,137,0,41)
 
-    -- drag
-    do local dragging=false local st,sp
-      root.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true st=i.Position sp=root.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end) end end)
-      UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then local d=i.Position-st root.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y) end end)
-    end
+-- Drag
+do local dragging=false local st,sp
+  Root.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true st=i.Position sp=Root.Position i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end) end end)
+  UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then local d=i.Position-st Root.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y) end end)
+end
 
-    local onOpen,onClose=nil,nil
-    local opened=true
-    function sg:Toggle(v) root.Visible=v opened=v if v and onOpen then onOpen() end if (not v) and onClose then onClose() end end
-
-    local win={}
-    function win:OnOpened(cb) onOpen=cb end
-    function win:OnClosed(cb) onClose=cb end
-    function win:CreateTab(topt)
-      local tabBtn=Instance.new("TextButton",tabsBar) tabBtn.Size=UDim2.new(1,0,0,28) tabBtn.Text=topt.Title or "Tab"
-      tabBtn.BackgroundColor3=Color3.fromRGB(30,30,30) tabBtn.TextColor3=Color3.fromRGB(230,230,230) tabBtn.Font=Enum.Font.GothamBold tabBtn.TextScaled=true
-      local btnC=Instance.new("UICorner",tabBtn) btnC.CornerRadius=UDim.new(0,8)
-      local page=Instance.new("ScrollingFrame",pages) page.Visible=false page.Size=UDim2.new(1,0,1,0) page.BackgroundTransparency=1 page.CanvasSize=UDim2.new(0,0,0,0)
-      page.ScrollBarThickness=6 page.ScrollBarImageColor3=Color3.fromRGB(80,220,160)
-      local pl=Instance.new("UIListLayout",page) pl.Padding=UDim.new(0,8)
-      tabBtn.MouseButton1Click:Connect(function() for _,v in ipairs(pages:GetChildren()) do if v:IsA("ScrollingFrame") then v.Visible=false end end page.Visible=true end)
-      if #pages:GetChildren()==1 then page.Visible=true end
-      local tab={}
-      function tab:CreateSection(optS)
-        local sec=Instance.new("Frame",page) sec.BackgroundTransparency=1 sec.Size=UDim2.new(1,-8,0,0) sec.AutomaticSize=Enum.AutomaticSize.Y
-        local slay=Instance.new("UIListLayout",sec) slay.Padding=UDim.new(0,6)
-        local title=Instance.new("TextLabel",sec) title.BackgroundTransparency=1 title.Text=optS.Title or "" title.Font=Enum.Font.GothamBold title.TextScaled=true title.TextColor3=Color3.fromRGB(255,255,255)
-        local api={}
-        function api:AddParagraph(o)
-          local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
-          l.Text=(o.Title or "").."\n"..(o.Content or "") return l
-        end
-        function api:AddButton(o)
-          local b=Instance.new("TextButton",sec) b.Size=UDim2.new(1,0,0,28) b.Text=o.Title or "Button" b.BackgroundColor3=Color3.fromRGB(34,34,34) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true
-          Instance.new("UICorner",b).CornerRadius=UDim.new(0,8) b.MouseButton1Click:Connect(function() if o.Callback then o.Callback() end end) return b
-        end
-        function api:AddToggle(o)
-          local f=Instance.new("TextButton",sec) f.Size=UDim2.new(1,0,0,28) f.BackgroundColor3=Color3.fromRGB(34,34,34) f.TextScaled=true f.Font=Enum.Font.GothamBold
-          local state=o.Default and true or false
-          local function vis() f.Text=(state and "ON  " or "OFF ")..(o.Title or "Toggle") f.TextColor3= state and Color3.fromRGB(140,255,200) or Color3.fromRGB(255,255,255)
-            TweenService:Create(f,TweenInfo.new(0.12,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{BackgroundColor3= state and Color3.fromRGB(0,170,110) or Color3.fromRGB(34,34,34)}):Play()
-          end
-          vis()
-          Instance.new("UICorner",f).CornerRadius=UDim.new(0,8)
-          f.MouseButton1Click:Connect(function() state=not state vis() if o.Callback then o.Callback(state) end end)
-          return { OnChanged=function(cb) f.MouseButton1Click:Connect(function() cb(state) end) end, Set=function(v) state=v vis() end }
-        end
-        function api:AddInput(o)
-          local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Text=o.Title or "" l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
-          local b=Instance.new("TextBox",sec) b.Size=UDim2.new(1,0,0,26) b.Text=o.Default or "" b.PlaceholderText=o.Placeholder or "" b.BackgroundColor3=Color3.fromRGB(34,34,34) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
-          b.FocusLost:Connect(function() if o.Callback then o.Callback(b.Text) end end)
-          return b
-        end
-        function api:AddSlider(o)
-          local l=Instance.new("TextLabel",sec) l.BackgroundTransparency=1 l.Text=(o.Title or "Slider")..": "..tostring(o.Default or o.Min) l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
-          local bar=Instance.new("Frame",sec) bar.Size=UDim2.new(1,0,0,8) bar.BackgroundColor3=Color3.fromRGB(40,40,40) Instance.new("UICorner",bar).CornerRadius=UDim.new(0,4)
-          local fill=Instance.new("Frame",bar) fill.Size=UDim2.new(0,0,1,0) fill.BackgroundColor3=Color3.fromRGB(60,200,140) Instance.new("UICorner",fill).CornerRadius=UDim.new(0,4)
-          local val=o.Default or o.Min
-          local function setv(n) n=math.clamp(n,o.Min,o.Max) val=n l.Text=(o.Title or "Slider")..": "..tostring(val) fill.Size=UDim2.new((val-o.Min)/(o.Max-o.Min),0,1,0) if o.Callback then o.Callback(val) end end
-          setv(val)
-          bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            local function upd(p) local rel=(p.X-bar.AbsolutePosition.X)/bar.AbsoluteSize.X setv(o.Min + rel*(o.Max-o.Min)) end
-            upd(game:GetService("UserInputService"):GetMouseLocation())
-          end end)
-          return { Set=function(n) setv(n) end }
-        end
-        return sec
+local function makeTab(name)
+  local btn=Instance.new("TextButton",Tabs) btn.Size=UDim2.new(1,0,0,28) btn.Text=name btn.BackgroundColor3=Color3.fromRGB(30,30,30)
+  btn.TextColor3=Color3.fromRGB(230,230,230) btn.Font=Enum.Font.GothamBold btn.TextScaled=true Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
+  local page=Instance.new("ScrollingFrame",Pages) page.Visible=false page.Size=UDim2.new(1,0,1,0) page.BackgroundTransparency=1 page.CanvasSize=UDim2.new(0,0,0,0)
+  page.ScrollBarThickness=6 page.ScrollBarImageColor3=Color3.fromRGB(80,220,160) local lay=Instance.new("UIListLayout",page) lay.Padding=UDim.new(0,8)
+  btn.MouseButton1Click:Connect(function() for _,v in ipairs(Pages:GetChildren()) do if v:IsA("ScrollingFrame") then v.Visible=false end end page.Visible=true end)
+  if #Pages:GetChildren()==0 then page.Visible=true end
+  local function section(title)
+    local frame=Instance.new("Frame",page) frame.BackgroundTransparency=1 frame.Size=UDim2.new(1,-8,0,0) frame.AutomaticSize=Enum.AutomaticSize.Y
+    local sl=Instance.new("UIListLayout",frame) sl.Padding=UDim.new(0,6)
+    local head=Instance.new("TextLabel",frame) head.BackgroundTransparency=1 head.Text=title head.Font=Enum.Font.GothamBold head.TextScaled=true head.TextColor3=Color3.fromRGB(255,255,255)
+    local api={}
+    function api:Paragraph(t,c) local l=Instance.new("TextLabel",frame) l.BackgroundTransparency=1 l.Text=(t or "").."\n"..(c or "") l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235) return l end
+    function api:Button(text,cb) local b=Instance.new("TextButton",frame) b.Size=UDim2.new(1,0,0,28) b.Text=text b.BackgroundColor3=Color3.fromRGB(34,34,34) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true Instance.new("UICorner",b).CornerRadius=UDim.new(0,8) b.MouseButton1Click:Connect(cb) return b end
+    function api:Toggle(text,default,cb)
+      local f=Instance.new("TextButton",frame) f.Size=UDim2.new(1,0,0,28) f.BackgroundColor3=Color3.fromRGB(34,34,34) f.TextScaled=true f.Font=Enum.Font.GothamBold Instance.new("UICorner",f).CornerRadius=UDim.new(0,8)
+      local state=default and true or false
+      local function paint()
+        f.Text=(state and "ON  " or "OFF ")..text
+        f.TextColor3= state and Color3.fromRGB(140,255,200) or Color3.fromRGB(255,255,255)
+        TweenService:Create(f,TweenInfo.new(0.12,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{BackgroundColor3= state and Color3.fromRGB(0,170,110) or Color3.fromRGB(34,34,34)}):Play()
       end
-      return tab
+      paint()
+      f.MouseButton1Click:Connect(function() state=not state paint() if cb then cb(state) end end)
+      return {Set=function(v) state=v paint() end, OnChanged=function(cb2) f.MouseButton1Click:Connect(function() cb2(state) end) end}
     end
-    return win
+    function api:Input(text,default,cb)
+      local l=Instance.new("TextLabel",frame) l.BackgroundTransparency=1 l.Text=text l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
+      local b=Instance.new("TextBox",frame) b.Size=UDim2.new(1,0,0,26) b.Text=default or "" b.BackgroundColor3=Color3.fromRGB(34,34,34) b.TextColor3=Color3.fromRGB(255,255,255) b.Font=Enum.Font.Gotham b.TextScaled=true Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
+      b.FocusLost:Connect(function() if cb then cb(b.Text) end end)
+      return b
+    end
+    function api:Slider(text,min,max,default,cb)
+      local l=Instance.new("TextLabel",frame) l.BackgroundTransparency=1 l.Text=text..": "..tostring(default) l.Font=Enum.Font.Gotham l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.TextColor3=Color3.fromRGB(235,235,235)
+      local bar=Instance.new("Frame",frame) bar.Size=UDim2.new(1,0,0,8) bar.BackgroundColor3=Color3.fromRGB(40,40,40) Instance.new("UICorner",bar).CornerRadius=UDim.new(0,4)
+      local fill=Instance.new("Frame",bar) fill.Size=UDim2.new(0,0,1,0) fill.BackgroundColor3=Color3.fromRGB(60,200,140) Instance.new("UICorner",fill).CornerRadius=UDim.new(0,4)
+      local val=default
+      local function setv(n) n=math.clamp(n,min,max) val=n l.Text=text..": "..tostring(val) fill.Size=UDim2.new((val-min)/(max-min),0,1,0) if cb then cb(val) end end
+      setv(default)
+      bar.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+          local mouse=UserInputService:GetMouseLocation()
+          local rel=(mouse.X-bar.AbsolutePosition.X)/bar.AbsoluteSize.X setv(min + rel*(max-min))
+        end
+      end)
+      return {Set=function(n) setv(n) end}
+    end
+    return api
   end
+  return btn,page,section
 end
 
--- Build window
-local Window=UI.Window({Title="OverHub GUI",SubTitle="Autoblock Suite",Size=UDim2.new(0,420,0,300)})
-Window:OnOpened(function() setBlur(true) end)
-Window:OnClosed(function() setBlur(false) end)
+-- Tabs and sections
+local MainBtn,MainPage,Section=makeTab("Main")
+local SettingsBtn,SettingsPage,SectionS=makeTab("Settings")
+local NewsBtn,NewsPage,SectionN=makeTab("New")
+local LinksBtn,LinksPage,SectionL=makeTab("Links")
 
--- Tabs
-local TabMain=Window:CreateTab({Title="Main"})
-local TabSettings=Window:CreateTab({Title="Settings"})
-local TabNews=Window:CreateTab({Title="New"})
-local TabLinks=Window:CreateTab({Title="Links"})
+-- Main tab
+local S1=Section("Status")
+local statusPara=S1:Paragraph("AUTOBLOCK", SAVE.detect and "ON" or "OFF")
+local function refreshStatus() statusPara.Text="AUTOBLOCK\n"..(SAVE.detect and "ON" or "OFF") end
 
--- Helpers
-local function addToggle(section,label,key,tip)
-    local t=section:AddToggle({Title=label,Description=tip or "",Default=SAVE[key]==true,Callback=function(v) SAVE[key]=v persist() end})
-    return t
-end
-local function addInput(section,label,key,ph)
-    section:AddInput({Title=label,Placeholder=ph or "",Default=tostring(SAVE[key]),Numeric=true,Callback=function(txt)local n=tonumber(txt) if n then SAVE[key]=n persist() end end})
-end
-local function addSlider(section,label,key,min,max,step)
-    section:AddSlider({Title=label,Min=min,Max=max,Default=SAVE[key],Increment=step or 1,Rounding=0,Callback=function(n) SAVE[key]=n persist() end})
-end
-local function addButton(section,label,cb) section:AddButton({Title=label,Callback=cb}) end
-local function addParagraph(section,title,content) return section:AddParagraph({Title=title,Content=content}) end
+local S2=Section("Toggles")
+local tDetect=S2:Toggle("Auto Block",SAVE.detect,function(v) SAVE.detect=v persist() refreshStatus() end)
+local tAfter =S2:Toggle("M1 After Block",SAVE.m1After,function(v) SAVE.m1After=v persist() end)
+local tCatch =S2:Toggle("M1 Dodge",SAVE.m1Catch,function(v) SAVE.m1Catch=v persist() end)
+local tCam   =S2:Toggle("Camlock Toggle",SAVE.camlock,function(v) SAVE.camlock=v persist() end)
+local tAC    =S2:Toggle("Auto Counter",SAVE.autoCounter,function(v) SAVE.autoCounter=v persist() end)
+local tNEL   =S2:Toggle("No Endlag (M1 Reset)",SAVE.noEndlag,function(v) SAVE.noEndlag=v persist() end)
 
--- Main
-local S1=TabMain:CreateSection({Title="Status"})
-local statusPara=addParagraph(S1,"AUTOBLOCK", SAVE.detect and "ON" or "OFF")
-local function refreshStatus() statusPara:SetContent(SAVE.detect and "ON" or "OFF") end
-local S2=TabMain:CreateSection({Title="Toggles"})
-local tDetect=addToggle(S2,"Auto Block","detect")
-local tAfter =addToggle(S2,"M1 After Block","m1After")
-local tCatch =addToggle(S2,"M1 Dodge","m1Catch")
-local tCam   =addToggle(S2,"Camlock Toggle","camlock")
-local tAC    =addToggle(S2,"Auto Counter","autoCounter")
-local tNEL   =addToggle(S2,"No Endlag (M1 Reset)","noEndlag")
-tDetect:OnChanged(refreshStatus)
+-- Settings tab
+local SR=SectionS("Ranges")
+SR:Input("M1 Range",tostring(SAVE.normal),function(txt) local n=tonumber(txt) if n then SAVE.normal=n persist() end end)
+SR:Input("Special Range",tostring(SAVE.special),function(txt) local n=tonumber(txt) if n then SAVE.special=n persist() end end)
+SR:Input("Skill Range",tostring(SAVE.skill),function(txt) local n=tonumber(txt) if n then SAVE.skill=n persist() end end)
+SR:Input("Skill Hold",tostring(SAVE.hold),function(txt) local n=tonumber(txt) if n then SAVE.hold=n persist() end end)
 
--- Settings
-local S3=TabSettings:CreateSection({Title="Ranges"})
-addInput(S3,"M1 Range","normal","1")
-addInput(S3,"Special Range","special","50")
-addInput(S3,"Skill Range","skill","50")
-addInput(S3,"Skill Hold","hold","1.2")
+local SC=SectionS("Auto Counter")
+SC:Slider("Counter Distance",5,30,SAVE.counterRange,function(n) SAVE.counterRange=n persist() end)
 
-local S4=TabSettings:CreateSection({Title="Auto Counter"})
-addSlider(S4,"Counter Distance","counterRange",5,30,1)
+local SG=SectionS("Blocking Gates")
+SG:Input("Dash Block CD",tostring(SAVE.dashBlockCooldown),function(txt) local n=tonumber(txt) if n then SAVE.dashBlockCooldown=n persist() end end)
+SG:Input("M1 Block CD",tostring(SAVE.m1BlockCooldown),function(txt) local n=tonumber(txt) if n then SAVE.m1BlockCooldown=n persist() end end)
 
-local S5=TabSettings:CreateSection({Title="Blocking Gates"})
-addInput(S5,"Dash Block CD","dashBlockCooldown","0.25")
-addInput(S5,"M1 Block CD","m1BlockCooldown","0.25")
+local SP=SectionS("Performance")
+local tFPS=SP:Toggle("FPS Boost",SAVE.fpsBoost,function(v) SAVE.fpsBoost=v persist() if _G.__OverhubFPS then _G.__OverhubFPS(v) end end)
 
-local S6=TabSettings:CreateSection({Title="Performance"})
-local tFPS=S6:AddToggle({Title="FPS Boost",Default=SAVE.fpsBoost,Callback=function(v) SAVE.fpsBoost=v persist() if _G.__OverhubFPS then _G.__OverhubFPS(v) end end})
+-- News tab
+local N1=SectionN("Changelog")
+N1:Paragraph("Info","Join discord for Auto Techs, M1 Reset, etc!")
 
--- News
-local N1=TabNews:CreateSection({Title="Changelog"})
-addParagraph(N1,"Info","Join discord for Auto Techs, M1 Reset, etc!")
-addParagraph(N1,"Embedded UI","No HTTP, no demo; same features")
-
--- Links
-local L1=TabLinks:CreateSection({Title="Discord"})
-addButton(L1,"Copy Discord Link",function()
-    local DISCORD="https://discord.gg/overhub"
-    if setclipboard then pcall(setclipboard,DISCORD) else StarterGui:SetCore("SetClipboard",DISCORD) end
+-- Links tab
+local L1=SectionL("Discord")
+L1:Button("Copy Discord Link",function()
+  local DISCORD="https://discord.gg/overhub"
+  if setclipboard then pcall(setclipboard,DISCORD) else StarterGui:SetCore("SetClipboard",DISCORD) end
 end)
 
 -- Camlock mini pill
@@ -201,6 +160,9 @@ do local d,st,sp,inp=false,nil,nil,nil
   MiniBtn.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then inp=i end end)
   UserInputService.InputChanged:Connect(function(i) if i==inp and d then local p=i.Position or Vector3.new() local dd=p-st MiniBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dd.X,sp.Y.Scale,sp.Y.Offset+dd.Y) end end)
 end
+
+-- Blur initially on
+setBlur(true)
 
 -- FPS Boost controller
 _G.__OverhubFPS=function(enabled)
@@ -227,19 +189,13 @@ end
 _G.__OverhubFPS(SAVE.fpsBoost)
 
 -- Export state for logic
-_G.OverhubUI={
-  Window=true,
-  State={
-    normalRange=function() return SAVE.normal end,specialRange=function() return SAVE.special end,skillRange=function() return SAVE.skill end,skillDelay=function() return SAVE.hold end,
-    detectActive=function() return SAVE.detect end,m1After=function() return SAVE.m1After end,m1Catch=function() return SAVE.m1Catch end,camlock=function() return SAVE.camlock end,
-    autoCounter=function() return SAVE.autoCounter end,counterRange=function() return SAVE.counterRange end,noEndlag=function() return SAVE.noEndlag end,
-    dashBlockCooldown=function() return SAVE.dashBlockCooldown end,m1BlockCooldown=function() return SAVE.m1BlockCooldown end,fpsBoost=function() return SAVE.fpsBoost end
-  },
-  _save=SAVE
-}
-setBlur(true)
--- end of snippet 1
--- OverHub Logic v1.0 (same features: autoblock with gates, Auto Counter, No Endlag forward dash)
+_G.OverhubUI={Window=true,State={
+  normalRange=function() return SAVE.normal end,specialRange=function() return SAVE.special end,skillRange=function() return SAVE.skill end,skillDelay=function() return SAVE.hold end,
+  detectActive=function() return SAVE.detect end,m1After=function() return SAVE.m1After end,m1Catch=function() return SAVE.m1Catch end,camlock=function() return SAVE.camlock end,
+  autoCounter=function() return SAVE.autoCounter end,counterRange=function() return SAVE.counterRange end,noEndlag=function() return SAVE.noEndlag end,
+  dashBlockCooldown=function() return SAVE.dashBlockCooldown end,m1BlockCooldown=function() return SAVE.m1BlockCooldown end,fpsBoost=function() return SAVE.fpsBoost end
+}, _save=SAVE, _setBlur=setBlur}
+-- OverHub Logic v1.1 (autoblock with dash/M1 gates, Auto Counter, No Endlag forward dash; same IDs)
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UserInputService=game:GetService("UserInputService")
@@ -254,11 +210,9 @@ local function fireRemote(goal,mobile)
   local c=ch:FindFirstChild("Communicate") if c then c:FireServer(unpack(args)) end
 end
 
--- Gates
 local lastDashAt=0
 local lastOwnM1At=0
 local leftClickActive=false
-
 UserInputService.InputBegan:Connect(function(input,processed)
   if processed then return end
   if input.KeyCode==Enum.KeyCode.Q then lastDashAt=os.clock() end
@@ -279,7 +233,6 @@ local function autoblockAllowed()
   return true
 end
 
--- IDs
 local delayed={ ["rbxassetid://10479335397"]=true, ["rbxassetid://13380255751"]=true, ["rbxassetid://134775406437626"]=true }
 local normal={
  ["rbxassetid://10469493270"]=true,["rbxassetid://10469630950"]=true,["rbxassetid://10469639222"]=true,["rbxassetid://10469643643"]=true,
@@ -320,7 +273,6 @@ local function scanAndBlock()
   local live=workspace:FindFirstChild("Live")
   local targets=live and live:GetChildren() or {}
   if not live then for _,p in ipairs(Players:GetPlayers()) do if p~=LP and p.Character then table.insert(targets,p.Character) end end end
-
   for _,char in ipairs(targets) do
     local hrp=char:FindFirstChild("HumanoidRootPart")
     local hum=char:FindFirstChildWhichIsA("Humanoid")
@@ -374,7 +326,6 @@ local function autoCounterTick()
   end
 end
 
--- No Endlag forward dash helper
 UserInputService.InputBegan:Connect(function(input,processed)
   if processed then return end
   if input.KeyCode==Enum.KeyCode.Q and (S.noEndlag and S.noEndlag()) then
@@ -389,4 +340,3 @@ RunService.Heartbeat:Connect(function()
   pcall(scanAndBlock)
   pcall(autoCounterTick)
 end)
--- end of snippet 2
