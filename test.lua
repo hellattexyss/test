@@ -1,4 +1,4 @@
--- TSB Autoblock + Camlock (Part 1/2) — Flat UI (no dropdowns), autosave, FPS boost, camlock mini
+-- TSB Autoblock + Camlock (Part 1/2): Flat Tabs (no sections), responsive size, autosave, mini camlock
 
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 local Players = game:GetService("Players")
@@ -6,7 +6,7 @@ local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 
--- State defaults
+-- State
 getgenv().tsbConfig = getgenv().tsbConfig or {
     AutoBlock=false, M1After=false, M1Catch=false,
     NormalRange=30, SpecialRange=50, SkillRange=50, SkillHold=1.2,
@@ -16,18 +16,37 @@ getgenv().tsbConfig = getgenv().tsbConfig or {
 }
 local State = getgenv().tsbConfig
 
--- Window
+-- Responsive size helper
+local function viewportSize()
+    local cam = Workspace.CurrentCamera
+    local v = cam and cam.ViewportSize or Vector2.new(1280, 720)
+    return v
+end
+local vp = viewportSize()
+local W = math.max(680, math.floor(vp.X*0.8))
+local H = math.max(520, math.floor(vp.Y*0.75))
+
+-- Window (force size and min size)
 local Window = WindUI:CreateWindow({
     Title="TSB Autoblock + Camlock",
     Icon="shield",
     Folder="TSB_WindUI",
-    Size=UDim2.fromOffset(720,540),
+    Size=UDim2.fromOffset(W, H),
     Theme="Dark",
     Resizable=true,
-    SideBarWidth=120,
+    SideBarWidth=140,
     HideSearchBar=true,
     ScrollBarEnabled=true,
 })
+if Window and Window.Instance then
+    -- enforce size after theme applies
+    task.defer(function()
+        pcall(function()
+            Window.Instance.Size = UDim2.fromOffset(W, H)
+            if Window.Instance.SetMinSize then Window.Instance:SetMinSize(Vector2.new(680, 520)) end
+        end)
+    end)
+end
 
 -- Autosave/load
 local Config = Window.ConfigManager
@@ -39,7 +58,7 @@ if isfile and isfile(loadFlag) then pcall(function() default:Load() end) end
 markAuto(loadFlag,true); markAuto(saveFlag,true)
 local function autosave() if default then pcall(function() default:Save() end) end end
 
--- Remotes + block control
+-- Remotes + block
 local function Communicate(goal, keycode, mobile)
     local c=LocalPlayer.Character; if not c then return end
     local r=c:FindFirstChild("Communicate"); if not r then return end
@@ -55,34 +74,37 @@ end
 local function DashGuard() if IsDashing() then lastDashAt=os.clock(); ReleaseBlock(); return end if os.clock()-lastDashAt<=State.DashReleaseTime then ReleaseBlock() end end
 local function CanReBlock() return (os.clock()-lastDashAt)>State.PostDashNoBlock end
 
--- Tabs
+-- Tabs (flat controls)
 local Combat = Window:Tab({ Title="Combat", Icon="swords" })
 local CamTab = Window:Tab({ Title="Camlock", Icon="camera" })
-local Tune   = Window:Tab({ Title="Tuning", Icon="sliders" })
-local Misc   = Window:Tab({ Title="Misc", Icon="settings" })
+local Tune = Window:Tab({ Title="Tuning", Icon="sliders" })
+local Misc = Window:Tab({ Title="Misc", Icon="settings" })
 
--- Flat headers + controls
-Combat:Header({ Title="Autoblock" })
+-- Combat tab
+Combat:Label({ Title="Autoblock" })
 Combat:Toggle({ Title="Auto Block", Value=State.AutoBlock, Callback=function(v) State.AutoBlock=v; if not v then ReleaseBlock() end; autosave() end })
 Combat:Toggle({ Title="M1 After Block", Value=State.M1After, Callback=function(v) State.M1After=v; autosave() end })
 Combat:Toggle({ Title="M1 Catch", Value=State.M1Catch, Callback=function(v) State.M1Catch=v; autosave() end })
 
-CamTab:Header({ Title="Camlock" })
-CamTab:Toggle({ Title="Camera Lock", Value=State.CamLock, Callback=function(v) State.CamLock=v; autosave() end })
+-- Camlock tab
+CamTab:Label({ Title="Controls" })
+CamTab:Toggle({ Title="Camera Lock", Value=State.CamLock, Callback=function(v) State.CamLock=v; autosave(); if mini then mini:SetVisible(v) end end })
 CamTab:Toggle({ Title="Require LoS", Value=State.CamDoLoS, Callback=function(v) State.CamDoLoS=v; autosave() end })
-Tune:Header({ Title="Ranges" })
+
+-- Tuning tab
+Tune:Label({ Title="Ranges" })
 Tune:Slider({ Title="Normal Range", Value={Min=5,Max=120,Default=State.NormalRange}, Callback=function(n) State.NormalRange=tonumber(n); autosave() end })
 Tune:Slider({ Title="Special Range", Value={Min=10,Max=150,Default=State.SpecialRange}, Callback=function(n) State.SpecialRange=tonumber(n); autosave() end })
 Tune:Slider({ Title="Skill Range", Value={Min=10,Max=150,Default=State.SkillRange}, Callback=function(n) State.SkillRange=tonumber(n); autosave() end })
-
-Tune:Header({ Title="Timings" })
+Tune:Label({ Title="Timings" })
 Tune:Slider({ Title="Skill Hold (s)", Step=0.05, Value={Min=0.2,Max=3,Default=State.SkillHold}, Callback=function(n) State.SkillHold=tonumber(n); autosave() end })
 Tune:Slider({ Title="Poke Block Time", Step=0.01, Value={Min=0.08,Max=0.35,Default=State.MinPress}, Callback=function(n) State.MinPress=tonumber(n); autosave() end })
 Tune:Slider({ Title="Combo Block Time", Step=0.01, Value={Min=0.4,Max=1.0,Default=State.ComboPress}, Callback=function(n) State.ComboPress=tonumber(n); autosave() end })
 Tune:Slider({ Title="Dash Release", Step=0.01, Value={Min=0.15,Max=0.7,Default=State.DashReleaseTime}, Callback=function(n) State.DashReleaseTime=tonumber(n); autosave() end })
 Tune:Slider({ Title="Post-dash No-Block", Step=0.01, Value={Min=0.1,Max=0.6,Default=State.PostDashNoBlock}, Callback=function(n) State.PostDashNoBlock=tonumber(n); autosave() end })
 
-Misc:Header({ Title="Performance" })
+-- Misc tab
+Misc:Label({ Title="Performance" })
 local originalLighting={}
 local function applyFPS(on)
     if on then
@@ -101,9 +123,13 @@ local function applyFPS(on)
 end
 Misc:Toggle({ Title="FPS Boost", Value=State.FPSBoost, Callback=function(v) State.FPSBoost=v; applyFPS(v); autosave() end })
 
--- Camlock mini toggle and highlight
-local mini = WindUI:CreateWindow({ Title="Camlock", Icon="crosshair", Size=UDim2.fromOffset(280,130), Transparent=true, Theme="Dark", Resizable=true, HideSearchBar=true, ScrollBarEnabled=false })
-local mSec = mini:Section({ Title="Quick" })
+-- Camlock mini window
+local mini = WindUI:CreateWindow({ Title="Camlock", Icon="crosshair", Size=UDim2.fromOffset(300,140), Transparent=true, Theme="Dark", Resizable=true, HideSearchBar=true, ScrollBarEnabled=false })
+local miniSec = mini:Tab({ Title="Mini", Icon="power" }) -- Add simple tab to ensure content in some builds
+mini:SetVisible(State.CamLock)
+miniSec:Toggle({ Title="Enabled", Value=State.CamLock, Callback=function(v) State.CamLock=v; mini:SetVisible(v); autosave() end })
+
+-- Target highlight
 local highlight
 local function setHighlight(model)
     if highlight then highlight:Destroy(); highlight=nil end
@@ -115,10 +141,8 @@ local function setHighlight(model)
     h.Adornee=model; h.Parent=Workspace
     highlight=h
 end
-mSec:Toggle({ Title="Enabled", Value=State.CamLock, Callback=function(v) State.CamLock=v; mini:SetVisible(v); autosave() end })
-mini:SetVisible(State.CamLock)
 
--- Export
+-- Export to logic
 _G.__TSB_Wind = {
     State=State,
     Communicate=Communicate,
@@ -128,7 +152,7 @@ _G.__TSB_Wind = {
     CanReBlock=CanReBlock,
     SetHighlight=setHighlight,
 }
--- TSB Autoblock + Camlock (Part 2/2) — Logic (accurate autoblock, camlock cone + highlight)
+-- TSB Autoblock + Camlock (Part 2/2): Logic (unchanged features)
 
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
@@ -192,15 +216,13 @@ local function comboCount(m) local c=0 for _,id in ipairs(comboIDs) do if m[id] 
 local function normalsAndSp(m,g) local n=0 for i=1,4 do if m[g[i]] then n+=1 end end return n, m[g.special] and true or false end
 local function hasSkill(m) for id in pairs(m) do if skillIDs[id] then return true end end return false end
 
--- Accuracy handling
-local lastBlockFrom={}, 0.25 -- cooldown
+local lastBlockFrom={}, 0.25
 local BLOCK_COOLDOWN=0.25
 local COMBO_END_GAP=0.15
 local lastActiveAnimAt=0
 
 local function TapM1IfClose(hrp)
-    local ch=LocalPlayer.Character; local my=ch and ch:FindFirstChild("HumanoidRootPart")
-    if not my or not hrp then return end
+    local ch=LocalPlayer.Character; local my=ch and ch:FindFirstChild("HumanoidRootPart"); if not my or not hrp then return end
     if (hrp.Position-my.Position).Magnitude<=10 then
         Communicate("LeftClick", true)
         task.delay(0.25,function() Communicate("LeftClickRelease", true) end)
@@ -210,8 +232,7 @@ end
 local function AutoBlockTick()
     if not State.AutoBlock or not CanReBlock() then return end
     local ch=LocalPlayer.Character; local my=HRPOf(ch); if not my then return end
-
-    local bestThreat, bestDist=nil, 1e9
+    local bestThreat,bestDist=nil,1e9
     for _,pl in ipairs(Players:GetPlayers()) do
         if pl~=LocalPlayer and pl.Character and InLive(pl.Character) then
             local hrp=HRPOf(pl.Character); local hum=pl.Character:FindFirstChildOfClass("Humanoid")
@@ -223,18 +244,11 @@ local function AutoBlockTick()
                         local cc=comboCount(m)
                         for _,g in pairs(allIDs) do
                             local n,sp=normalsAndSp(m,g)
-                            if cc==2 and n>=2 and dist<=State.SpecialRange then
-                                if dist<bestDist then bestThreat={pl,hrp,"combo"}; bestDist=dist end
-                            elseif n>0 and dist<=State.NormalRange then
-                                if dist<bestDist then bestThreat={pl,hrp,"poke"}; bestDist=dist end
-                            elseif sp and dist<=State.SpecialRange and not State.M1Catch then
-                                if dist<bestDist then bestThreat={pl,hrp,"special"}; bestDist=dist end
-                            end
+                            if cc==2 and n>=2 and dist<=State.SpecialRange then if dist<bestDist then bestThreat={pl,hrp,"combo"}; bestDist=dist end
+                            elseif n>0 and dist<=State.NormalRange then if dist<bestDist then bestThreat={pl,hrp,"poke"}; bestDist=dist end
+                            elseif sp and dist<=State.SpecialRange and not State.M1Catch then if dist<bestDist then bestThreat={pl,hrp,"special"}; bestDist=dist end end
                         end
-                        if hasSkill(m) and dist<=State.SkillRange then
-                            if dist<bestDist then bestThreat={pl,hrp,"skill"}; bestDist=dist end
-                        end
-                        -- Track combo active time for release
+                        if hasSkill(m) and dist<=State.SkillRange then if dist<bestDist then bestThreat={pl,hrp,"skill"}; bestDist=dist end end
                         for _ in pairs(m) do lastActiveAnimAt=now() break end
                     end
                 end
@@ -260,10 +274,7 @@ local function AutoBlockTick()
         ReleaseBlock()
     end
 
-    -- Rapid release when nearby attackers stop animating
-    if (now()-lastActiveAnimAt)>=COMBO_END_GAP then
-        ReleaseBlock()
-    end
+    if (now()-lastActiveAnimAt)>=COMBO_END_GAP then ReleaseBlock() end
 end
 
 local lastCatch=0
@@ -294,7 +305,6 @@ local function M1CatchTick()
     end
 end
 
--- Camlock with target highlight
 local targetHRP
 local function HasLoS(fromPos,toPart)
     if not State.CamDoLoS then return true end
