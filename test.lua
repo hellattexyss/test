@@ -1,255 +1,64 @@
--- TSB Autoblock + Camlock (Part 1/2): Local UI, bigger window, working slider defaults and drag
+-- TSB Autoblock + Camlock (Part 1/2): Force WindUI only; no fallback UI
 
 -- Services
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Prefer gethui for input reliability
-local function ui_parent()
+-- Parent under gethui if available for reliable input
+local function get_ui_parent()
     local ok, hui = pcall(gethui)
     if ok and typeof(hui) == "Instance" then return hui end
     return LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Utility
-local function round2(x) return math.round(x*100)/100 end
+-- Provided signed release URL (may expire), then stable CDN mirror
+local WINDUI_URLS = {
+    "https://release-assets.githubusercontent.com/github-production-release-asset/880118829/d9f903a8-6e0e-42b5-9a2b-ca6361f5e26b?sp=r&sv=2018-11-09&sr=b&spr=https&se=2025-09-29T20%3A01%3A17Z&rscd=attachment%3B+filename%3Dmain.lua&rsct=application%2Foctet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2025-09-29T19%3A01%3A12Z&ske=2025-09-29T20%3A01%3A17Z&sks=b&skv=2018-11-09&sig=KkwuzuNNMqln18G8qduUNobCBGZjwoGVAJkpCRiXF5Y%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc1OTE3Mjc3MiwibmJmIjoxNzU5MTcyNDcyLCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.y1uviMHORmWQpdZD0wGuBq4ZNEVCP0hW0cGqq4EJR0Q&response-content-disposition=attachment%3B%20filename%3Dmain.lua&response-content-type=application%2Foctet-stream",
+    "https://cdn.jsdelivr.net/gh/Footagesus/WindUI/main.lua"
+}
 
--- Minimal UI kit (window/section/toggle/slider/input/paragraph)
-local UI = {}
-do
-    local Screen = Instance.new("ScreenGui")
-    Screen.Name = "TSB_WindLocal"
-    Screen.ResetOnSpawn = false
-    Screen.IgnoreGuiInset = true
-    Screen.Parent = ui_parent()
-
-    function UI.Window(opts)
-        local W = Instance.new("Frame")
-        W.Name = "TSBWindow"
-        W.AnchorPoint = Vector2.new(0.5, 0.5)
-        W.Position = UDim2.fromScale(0.5, 0.5)
-        W.Size = opts.Size or UDim2.fromOffset(680, 520) -- larger default
-        W.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
-        W.Active = true
-        W.Draggable = true
-        W.Parent = Screen
-
-        local Title = Instance.new("TextLabel")
-        Title.BackgroundTransparency = 1
-        Title.Size = UDim2.new(1, -20, 0, 28)
-        Title.Position = UDim2.new(0, 10, 0, 6)
-        Title.Font = Enum.Font.GothamBold
-        Title.TextSize = 16
-        Title.TextXAlignment = Enum.TextXAlignment.Left
-        Title.TextColor3 = Color3.fromRGB(235, 235, 235)
-        Title.Text = tostring(opts.Title or "TSB")
-        Title.Parent = W
-
-        local Holder = Instance.new("ScrollingFrame")
-        Holder.Name = "Body"
-        Holder.Size = UDim2.new(1, -20, 1, -44)
-        Holder.Position = UDim2.new(0, 10, 0, 36)
-        Holder.BackgroundTransparency = 1
-        Holder.ScrollBarThickness = 4
-        Holder.Parent = W
-
-        local List = Instance.new("UIListLayout")
-        List.Padding = UDim.new(0, 10)
-        List.SortOrder = Enum.SortOrder.LayoutOrder
-        List.Parent = Holder
-
-        local function Section(title)
-            local S = Instance.new("Frame")
-            S.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-            S.Size = UDim2.new(1, 0, 0, 84)
-            S.Parent = Holder
-
-            local SL = Instance.new("UIListLayout")
-            SL.Padding = UDim.new(0, 6)
-            SL.Parent = S
-
-            local H = Instance.new("TextLabel")
-            H.BackgroundTransparency = 1
-            H.Size = UDim2.new(1, -12, 0, 20)
-            H.Position = UDim2.new(0, 12, 0, 6)
-            H.Font = Enum.Font.GothamBold
-            H.TextSize = 14
-            H.TextXAlignment = Enum.TextXAlignment.Left
-            H.TextColor3 = Color3.fromRGB(220, 220, 220)
-            H.Text = title or "Section"
-            H.Parent = S
-
-            local function Toggle(info)
-                local B = Instance.new("TextButton")
-                B.Size = UDim2.new(1, -16, 0, 28)
-                B.Position = UDim2.new(0, 8, 0, 28)
-                B.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-                B.AutoButtonColor = false
-                B.Text = (info.Title or "Toggle") .. ": OFF"
-                B.Font = Enum.Font.Gotham
-                B.TextSize = 14
-                B.TextColor3 = Color3.fromRGB(235, 235, 235)
-                B.Parent = S
-
-                local val = info.Default or false
-                local function paint()
-                    B.Text = (info.Title or "Toggle") .. ": " .. (val and "ON" or "OFF")
-                    B.BackgroundColor3 = val and Color3.fromRGB(50, 140, 70) or Color3.fromRGB(50, 50, 50)
-                end
-                paint()
-
-                B.MouseButton1Click:Connect(function()
-                    val = not val
-                    paint()
-                    if info.Callback then task.spawn(info.Callback, val) end
-                end)
-
-                return { Set = function(_, v) val = not not v; paint(); if info.Callback then task.spawn(info.Callback, val) end end }
-            end
-
-            local function Slider(info)
-                local F = Instance.new("Frame")
-                F.Size = UDim2.new(1, -16, 0, 40)
-                F.Position = UDim2.new(0, 8, 0, 28)
-                F.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-                F.Parent = S
-
-                local L = Instance.new("TextLabel")
-                L.BackgroundTransparency = 1
-                L.Size = UDim2.new(1, -12, 0, 16)
-                L.Position = UDim2.new(0, 6, 0, 2)
-                L.Font = Enum.Font.Gotham
-                L.TextSize = 13
-                L.TextXAlignment = Enum.TextXAlignment.Left
-                L.TextColor3 = Color3.fromRGB(235, 235, 235)
-                L.Text = info.Title or "Slider"
-                L.Parent = F
-
-                local Bar = Instance.new("Frame")
-                Bar.Size = UDim2.new(1, -12, 0, 8)
-                Bar.Position = UDim2.new(0, 6, 0, 24)
-                Bar.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
-                Bar.Parent = F
-
-                local Fill = Instance.new("Frame")
-                Fill.Size = UDim2.new(0, 0, 1, 0)
-                Fill.BackgroundColor3 = Color3.fromRGB(90, 160, 100)
-                Fill.Parent = Bar
-
-                local min = info.Min or 0
-                local max = info.Max or 100
-                local decimals = info.Decimals or ((max - min) <= 10 and 2 or 0)
-                local suffix = info.Suffix or ""
-                local val = info.Default or min
-                local dragging = false
-
-                local function set_value(v)
-                    v = math.clamp(v, min, max)
-                    val = v
-                    local w = math.max(1, Bar.AbsoluteSize.X)
-                    local pct = (val - min) / math.max(1e-9, (max - min))
-                    Fill.Size = UDim2.new(pct, 0, 1, 0)
-                    local shown = decimals > 0 and string.format("%0."..decimals.."f", val) or tostring(math.floor(val + 0.5))
-                    L.Text = string.format("%s: %s%s", info.Title or "Slider", shown, suffix)
-                    if info.Callback then task.spawn(info.Callback, val) end
-                end
-
-                local function set_from_x(x)
-                    local w = math.max(1, Bar.AbsoluteSize.X)
-                    local rel = math.clamp((x - Bar.AbsolutePosition.X) / w, 0, 1)
-                    local v = min + (max - min) * rel
-                    if decimals > 0 then v = round2(v) end
-                    set_value(v)
-                end
-
-                Bar.InputBegan:Connect(function(i)
-                    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-                        dragging = true
-                        set_from_x(i.Position.X)
-                    end
-                end)
-                Bar.InputEnded:Connect(function(i)
-                    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-                        dragging = false
-                    end
-                end)
-                UserInputService.InputChanged:Connect(function(i)
-                    if not dragging then return end
-                    if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
-                        set_from_x(i.Position.X)
-                    end
-                end)
-
-                -- Apply default immediately so it doesn't show 0
-                task.defer(function() set_value(val) end)
-
-                return { Set = set_value }
-            end
-
-            local function Input(info)
-                local F = Instance.new("Frame")
-                F.Size = UDim2.new(1, -16, 0, 34)
-                F.Position = UDim2.new(0, 8, 0, 28)
-                F.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-                F.Parent = S
-
-                local Box = Instance.new("TextBox")
-                Box.Size = UDim2.new(1, -12, 1, -6)
-                Box.Position = UDim2.new(0, 6, 0, 3)
-                Box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-                Box.TextColor3 = Color3.fromRGB(235, 235, 235)
-                Box.PlaceholderText = info.Title or "Input"
-                Box.Text = tostring(info.Value or "")
-                Box.Font = Enum.Font.Gotham
-                Box.TextSize = 14
-                Box.Parent = F
-
-                Box.FocusLost:Connect(function()
-                    local t = Box.Text
-                    if info.Numeric then
-                        local n = tonumber(t)
-                        if n and info.Callback then task.spawn(info.Callback, n) end
-                    else
-                        if info.Callback then task.spawn(info.Callback, t) end
-                    end
-                end)
-                return { Set = function(_, v) Box.Text = tostring(v) end }
-            end
-
-            local function Paragraph(info)
-                local L = Instance.new("TextLabel")
-                L.BackgroundTransparency = 1
-                L.Size = UDim2.new(1, -16, 0, 20)
-                L.Position = UDim2.new(0, 8, 0, 28)
-                L.Font = Enum.Font.Gotham
-                L.TextSize = 13
-                L.TextXAlignment = Enum.TextXAlignment.Left
-                L.TextColor3 = Color3.fromRGB(210, 210, 210)
-                L.Text = (info.Title or "") .. " " .. (info.Desc or "")
-                L.Parent = S
-                return { SetDesc = function(_, t) L.Text = t end }
-            end
-
-            return { Toggle = Toggle, Slider = Slider, Input = Input, Paragraph = Paragraph }
+local function load_windui_only()
+    for _, url in ipairs(WINDUI_URLS) do
+        local ok, mod = pcall(function()
+            local src = game:HttpGet(url)
+            return loadstring(src)()
+        end)
+        if ok and type(mod) == "table" and type(mod.CreateWindow) == "function" then
+            return mod
         end
-
-        return { Section = Section }
     end
-    UI._Screen = Screen
+    return nil
 end
 
--- Build window and sections
-local Window = UI.Window({ Title = "TSB Autoblock + Camlock", Size = UDim2.fromOffset(720, 540) })
-local S_Auto  = Window.Section("Autoblock")
-local S_M1    = Window.Section("M1 Helpers")
-local S_Cam   = Window.Section("Camlock")
-local S_Range = Window.Section("Ranges")
-local S_Time  = Window.Section("Timings")
-local S_View  = Window.Section("View Cone")
+local WindUI = load_windui_only()
+if not WindUI then
+    warn("[TSB] WindUI failed to load from both sources; aborting to avoid non-WindUI UI.")
+    return
+end
 
--- Defaults from original script
+WindUI:SetTheme("Dark")
+
+-- Build window and tabs
+local Window = WindUI:CreateWindow({
+    Title = "TSB Autoblock + Camlock",
+    Icon = "shield",
+    Size = UDim2.fromOffset(700, 520),
+    Parent = get_ui_parent(),
+})
+
+local TabMain = Window:Tab({ Title = "Combat", Icon = "swords" })
+local TabCam  = Window:Tab({ Title = "Camlock", Icon = "camera" })
+local TabTune = Window:Tab({ Title = "Tuning", Icon = "sliders" })
+
+local S_Auto  = TabMain:Section({ Title = "Autoblock" })
+local S_M1    = TabMain:Section({ Title = "M1 Helpers" })
+local S_Cam   = TabCam:Section({ Title = "Lock Controls" })
+local S_Range = TabTune:Section({ Title = "Ranges" })
+local S_Time  = TabTune:Section({ Title = "Timings" })
+local S_View  = TabTune:Section({ Title = "View Cone" })
+
+-- Defaults from original
 local State = {
     AutoBlock=false, M1After=false, M1Catch=false,
     NormalRange=30, SpecialRange=50, SkillRange=50, SkillHold=1.2,
@@ -257,9 +66,9 @@ local State = {
     CamLock=false, CamFovDeg=35, CamMaxDistance=120, CamDoLoS=true,
 }
 
--- Communicate + block guard
+-- Communicate and block controls
 local function Communicate(goal, keycode, mobile)
-    local c = LocalPlayer.Character; if not c then return end
+    local c = Players.LocalPlayer.Character; if not c then return end
     local r = c:FindFirstChild("Communicate"); if not r then return end
     r:FireServer({ Goal=goal, Key=keycode, Mobile=mobile or nil })
 end
@@ -267,41 +76,42 @@ local blocking, lastDashAt = false, 0
 local function PressBlock() if blocking then return end blocking=true; Communicate("KeyPress", Enum.KeyCode.F) end
 local function ReleaseBlock() if not blocking then return end blocking=false; Communicate("KeyRelease", Enum.KeyCode.F) end
 local function IsDashing()
-    local c=LocalPlayer.Character; local hrp=c and c:FindFirstChild("HumanoidRootPart"); if not hrp then return false end
+    local ch=Players.LocalPlayer.Character; local hrp=ch and ch:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
     local v=hrp.Velocity; return Vector3.new(v.X,0,v.Z).Magnitude>38
 end
 local function DashGuard() if IsDashing() then lastDashAt=os.clock(); ReleaseBlock(); return end if os.clock()-lastDashAt<=State.DashReleaseTime then ReleaseBlock() end end
 local function CanReBlock() return (os.clock()-lastDashAt)>State.PostDashNoBlock end
 
--- Controls with defaults applied
-S_Auto.Toggle({ Title="Auto Block", Default=false, Callback=function(v) State.AutoBlock=v; if not v then ReleaseBlock() end end })
-S_M1.Toggle({ Title="M1 After Block", Default=false, Callback=function(v) State.M1After=v end })
-S_M1.Toggle({ Title="M1 Catch", Default=false, Callback=function(v) State.M1Catch=v end })
+-- Controls with default initialization
+S_Auto:Toggle({ Title="Auto Block", Default=false, Callback=function(v) State.AutoBlock=v; if not v then ReleaseBlock() end end })
+S_M1:Toggle({ Title="M1 After Block", Default=false, Callback=function(v) State.M1After=v end })
+S_M1:Toggle({ Title="M1 Catch", Default=false, Callback=function(v) State.M1Catch=v end })
 
-local slNormal = S_Range.Slider({ Title="Normal Range", Min=5, Max=120, Default=State.NormalRange, Suffix=" studs", Callback=function(v) State.NormalRange=v end })
-local slSpecial= S_Range.Slider({ Title="Special Range", Min=10, Max=150, Default=State.SpecialRange, Suffix=" studs", Callback=function(v) State.SpecialRange=v end })
-local slSkill  = S_Range.Slider({ Title="Skill Range", Min=10, Max=150, Default=State.SkillRange, Suffix=" studs", Callback=function(v) State.SkillRange=v end })
-local inHold   = S_Time.Input({ Title="Skill Hold (s)", Value=tostring(State.SkillHold), Numeric=true, Callback=function(n) if n and n>0 then State.SkillHold=n end end })
+S_Range:Slider({ Title="Normal Range", Min=5, Max=120, Default=State.NormalRange, Suffix=" studs", Callback=function(v) State.NormalRange=v end })
+S_Range:Slider({ Title="Special Range", Min=10, Max=150, Default=State.SpecialRange, Suffix=" studs", Callback=function(v) State.SpecialRange=v end })
+S_Range:Slider({ Title="Skill Range", Min=10, Max=150, Default=State.SkillRange, Suffix=" studs", Callback=function(v) State.SkillRange=v end })
 
-local slPoke   = S_Time.Slider({ Title="Poke Block Time", Min=0.08, Max=0.35, Default=State.MinPress, Decimals=2, Suffix=" s", Callback=function(v) State.MinPress=v end })
-local slCombo  = S_Time.Slider({ Title="Combo Block Time", Min=0.4, Max=1.0, Default=State.ComboPress, Decimals=2, Suffix=" s", Callback=function(v) State.ComboPress=v end })
-local slDRel   = S_Time.Slider({ Title="Dash Release", Min=0.15, Max=0.7, Default=State.DashReleaseTime, Decimals=2, Suffix=" s", Callback=function(v) State.DashReleaseTime=v end })
-local slPost   = S_Time.Slider({ Title="Post-dash No-Block", Min=0.1, Max=0.6, Default=State.PostDashNoBlock, Decimals=2, Suffix=" s", Callback=function(v) State.PostDashNoBlock=v end })
+S_Time:Input({ Title="Skill Hold (s)", Value=tostring(State.SkillHold), Numeric=true, Callback=function(n) local x=tonumber(n); if x and x>0 then State.SkillHold=x end end })
+S_Time:Slider({ Title="Poke Block Time", Min=0.08, Max=0.35, Default=State.MinPress, Decimals=2, Suffix=" s", Callback=function(v) State.MinPress=v end })
+S_Time:Slider({ Title="Combo Block Time", Min=0.4, Max=1.0, Default=State.ComboPress, Decimals=2, Suffix=" s", Callback=function(v) State.ComboPress=v end })
+S_Time:Slider({ Title="Dash Release", Min=0.15, Max=0.7, Default=State.DashReleaseTime, Decimals=2, Suffix=" s", Callback=function(v) State.DashReleaseTime=v end })
+S_Time:Slider({ Title="Post-dash No-Block", Min=0.1, Max=0.6, Default=State.PostDashNoBlock, Decimals=2, Suffix=" s", Callback=function(v) State.PostDashNoBlock=v end })
 
-local tCam     = S_Cam.Toggle({ Title="Camera Lock", Default=false, Callback=function(v) State.CamLock=v end })
-local pMini    = Window.Section("Camlock Status").Paragraph({ Title="Target:", Desc="None" })
+local CamMini = WindUI:CreateWindow({ Title="Camlock", Icon="crosshair", Size=UDim2.fromOffset(280, 130), Parent=get_ui_parent() })
+local MiniSec = CamMini:Section({ Title="Quick" })
+local T_Cam = S_Cam:Toggle({ Title="Camera Lock", Default=false, Callback=function(v) State.CamLock=v; CamMini:SetVisible(v) end })
+MiniSec:Toggle({ Title="Enabled", Default=false, Callback=function(v) T_Cam:Set(v) end })
+local MiniLabel = MiniSec:Paragraph({ Title="Target", Desc="None" })
+CamMini:SetVisible(false)
 
 -- Export
 _G.__TSB_Wind = {
-    State = State,
-    PressBlock = PressBlock,
-    ReleaseBlock = ReleaseBlock,
-    DashGuard = DashGuard,
-    CanReBlock = CanReBlock,
-    MiniLabel = pMini,
-    Communicate = Communicate,
+    State=State, PressBlock=PressBlock, ReleaseBlock=ReleaseBlock,
+    DashGuard=DashGuard, CanReBlock=CanReBlock,
+    MiniLabel=MiniLabel, Communicate=Communicate,
 }
--- TSB Autoblock + Camlock (Part 2/2): Logic core
+-- TSB Autoblock + Camlock (Part 2/2): Logic
 
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
@@ -321,7 +131,6 @@ local MiniLabel=W.MiniLabel
 local Communicate=W.Communicate
 local function now() return os.clock() end
 
--- IDs from original
 local comboIDs={10480793962,10480796021}
 local allIDs={
     Saitama={10469493270,10469630950,10469639222,10469643643,special=10479335397},
@@ -347,7 +156,6 @@ local skillIDs={
 local function HRPOf(c) return c and c:FindFirstChild("HumanoidRootPart") end
 local function InLive(c) local live=Workspace:FindFirstChild("Live"); return c and c.Parent==(live or Workspace) end
 
--- Safe animation scan
 local lastScan=0
 local function getAnims(h)
     if not h then return nil end
@@ -443,7 +251,7 @@ local function M1CatchTick()
     end
 end
 
--- Camlock: camera cone + LoS
+-- Camlock: camera cone with optional LoS; camera-only CFrame
 local targetHRP
 local function HasLoS(fromPos,toPart)
     if not State.CamDoLoS then return true end
