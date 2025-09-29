@@ -1,4 +1,4 @@
--- TSB WindUI Autoblock + Camlock (Part 1/2): safe loader, interactive UI, old defaults
+-- TSB WindUI Autoblock + Camlock (Part 1/2): CDN fallback + interactive UI
 
 -- Services
 local Players = game:GetService("Players")
@@ -6,29 +6,40 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Prefer gethui for reliable input across executors
+-- Reliable interactive parent
 local function get_ui_parent()
     local ok, hui = pcall(gethui)
     if ok and typeof(hui) == "Instance" then return hui end
     return LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Guarded WindUI loader (prevents line 1/17 crashes if HTTP returns HTML/404)
-local WindUI
-do
-    local ok, mod = pcall(function()
-        return loadstring(game:HttpGet("https://footagesus.github.io/WindUI-Docs/loader.lua"))() -- docs loader
-    end)
-    if not ok or type(mod) ~= "table" or type(mod.CreateWindow) ~= "function" then
-        warn("[WindUI] Loader failed; aborting UI init. Check network/URL.") -- no hard error
-        return
+-- Robust WindUI loader with fallbacks
+local function load_windui()
+    local urls = {
+        "https://cdn.jsdelivr.net/gh/Footagesus/WindUI/Example.lua", -- jsDelivr GH CDN (Lua returns actual lib in Example loader style)
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/Example.lua", -- raw fallback
+        "https://footagesus.github.io/WindUI-Docs/loader.lua", -- docs loader (may be blocked in some executors)
+    }
+    for _, url in ipairs(urls) do
+        local ok, mod = pcall(function()
+            local src = game:HttpGet(url)
+            return loadstring(src)()
+        end)
+        if ok and type(mod) == "table" and type(mod.CreateWindow) == "function" then
+            return mod
+        end
     end
-    WindUI = mod
+    return nil
 end
 
+local WindUI = load_windui()
+if not WindUI then
+    warn("[WindUI] All loaders failed; aborting UI init to avoid crashes.")
+    return
+end
 WindUI:SetTheme("Dark")
 
--- Main window
+-- Window
 local Window = WindUI:CreateWindow({
     Title = "TSB Autoblock + Camlock",
     Icon = "shield",
@@ -40,119 +51,70 @@ local Window = WindUI:CreateWindow({
 local TabMain = Window:Tab({ Title = "Combat", Icon = "swords" })
 local TabCam  = Window:Tab({ Title = "Camlock", Icon = "camera" })
 local TabTune = Window:Tab({ Title = "Tuning", Icon = "sliders" })
+local S_Auto  = TabMain:Section({ Title = "Autoblock" })
+local S_M1    = TabMain:Section({ Title = "M1 Helpers" })
+local S_Cam   = TabCam:Section({ Title = "Lock Controls" })
+local S_Range = TabTune:Section({ Title = "Ranges" })
+local S_Time  = TabTune:Section({ Title = "Timings" })
+local S_View  = TabTune:Section({ Title = "View Cone" })
 
-local S_Auto = TabMain:Section({ Title = "Autoblock" })
-local S_M1   = TabMain:Section({ Title = "M1 Helpers" })
-local S_Cam  = TabCam:Section({ Title = "Lock Controls" })
-local S_Range= TabTune:Section({ Title = "Ranges" })
-local S_Time = TabTune:Section({ Title = "Timings" })
-local S_View = TabTune:Section({ Title = "View Cone" })
-
--- Defaults from original script
+-- Old defaults preserved
 local State = {
-    AutoBlock = false,
-    M1After = false,
-    M1Catch = false,
-
-    NormalRange = 30,   -- old normalRange
-    SpecialRange = 50,  -- old specialRange
-    SkillRange  = 50,   -- old skillRange
-    SkillHold   = 1.2,  -- old skillDelay
-
-    MinPress = 0.15,    -- old poke wait
-    ComboPress = 0.70,  -- old combo hold
-    DashReleaseTime = 0.35,
-    PostDashNoBlock = 0.20,
-
-    CamLock = false,
-    CamFovDeg = 35,
-    CamMaxDistance = 120,
-    CamDoLoS = true,
+    AutoBlock = false, M1After = false, M1Catch = false,
+    NormalRange = 30, SpecialRange = 50, SkillRange = 50, SkillHold = 1.2,
+    MinPress = 0.15, ComboPress = 0.70, DashReleaseTime = 0.35, PostDashNoBlock = 0.20,
+    CamLock = false, CamFovDeg = 35, CamMaxDistance = 120, CamDoLoS = true,
 }
 
--- Communicate remote (from original)
+-- Communicate remote
 local function Communicate(goal, keycode, mobile)
     local char = LocalPlayer.Character
     if not char then return end
-    local remote = char:FindFirstChild("Communicate")
-    if not remote then return end
-    remote:FireServer({ Goal = goal, Key = keycode, Mobile = mobile or nil })
+    local r = char:FindFirstChild("Communicate")
+    if not r then return end
+    r:FireServer({ Goal = goal, Key = keycode, Mobile = mobile or nil })
 end
 
--- Block handling with dash unstick
+-- Block + dash guard
 local blocking, lastDashAt = false, 0
-local function PressBlock()
-    if blocking then return end
-    blocking = true
-    Communicate("KeyPress", Enum.KeyCode.F)
-end
-local function ReleaseBlock()
-    if not blocking then return end
-    blocking = false
-    Communicate("KeyRelease", Enum.KeyCode.F)
-end
+local function PressBlock() if blocking then return end blocking = true; Communicate("KeyPress", Enum.KeyCode.F) end
+local function ReleaseBlock() if not blocking then return end blocking = false; Communicate("KeyRelease", Enum.KeyCode.F) end
 local function IsDashing()
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local c = LocalPlayer.Character; local hrp = c and c:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
-    local v = hrp.Velocity
-    return Vector3.new(v.X, 0, v.Z).Magnitude > 38
+    local v = hrp.Velocity; return Vector3.new(v.X,0,v.Z).Magnitude > 38
 end
 local function DashGuard()
-    if IsDashing() then
-        lastDashAt = os.clock()
-        ReleaseBlock()
-        return
-    end
-    if os.clock() - lastDashAt <= State.DashReleaseTime then
-        ReleaseBlock()
-    end
+    if IsDashing() then lastDashAt = os.clock(); ReleaseBlock(); return end
+    if os.clock() - lastDashAt <= State.DashReleaseTime then ReleaseBlock() end
 end
-local function CanReBlock()
-    return (os.clock() - lastDashAt) > State.PostDashNoBlock
-end
+local function CanReBlock() return (os.clock() - lastDashAt) > State.PostDashNoBlock end
 
--- Controls: toggles/sliders update State live
-S_Auto:Toggle({ Title = "Auto Block", Default = false, Callback = function(v)
-    State.AutoBlock = v
-    if not v then ReleaseBlock() end
-end })
+-- UI controls
+S_Auto:Toggle({ Title = "Auto Block", Default = false, Callback = function(v) State.AutoBlock = v; if not v then ReleaseBlock() end end })
 S_M1:Toggle({ Title = "M1 After Block", Default = false, Callback = function(v) State.M1After = v end })
 S_M1:Toggle({ Title = "M1 Catch", Default = false, Callback = function(v) State.M1Catch = v end })
 
-S_Range:Slider({ Title = "Normal Range", Min = 5, Max = 120, Default = State.NormalRange, Suffix = "studs",
-    Callback = function(v) State.NormalRange = v end })
-S_Range:Slider({ Title = "Special Range", Min = 10, Max = 150, Default = State.SpecialRange, Suffix = "studs",
-    Callback = function(v) State.SpecialRange = v end })
-S_Range:Slider({ Title = "Skill Range", Min = 10, Max = 150, Default = State.SkillRange, Suffix = "studs",
-    Callback = function(v) State.SkillRange = v end })
-S_Time:Input({ Title = "Skill Hold (s)", Value = tostring(State.SkillHold), Numeric = true,
-    Callback = function(text) local n = tonumber(text); if n and n>0 then State.SkillHold = n end end })
+S_Range:Slider({ Title = "Normal Range", Min=5, Max=120, Default=State.NormalRange, Suffix="studs", Callback=function(v) State.NormalRange=v end })
+S_Range:Slider({ Title = "Special Range", Min=10, Max=150, Default=State.SpecialRange, Suffix="studs", Callback=function(v) State.SpecialRange=v end })
+S_Range:Slider({ Title = "Skill Range", Min=10, Max=150, Default=State.SkillRange, Suffix="studs", Callback=function(v) State.SkillRange=v end })
+S_Time:Input({ Title="Skill Hold (s)", Value=tostring(State.SkillHold), Numeric=true, Callback=function(t) local n=tonumber(t); if n and n>0 then State.SkillHold=n end end })
 
-S_Time:Slider({ Title = "Poke Block Time", Min = 0.08, Max = 0.35, Default = State.MinPress, Decimals = 2, Suffix = "s",
-    Callback = function(v) State.MinPress = v end })
-S_Time:Slider({ Title = "Combo Block Time", Min = 0.4, Max = 1.0, Default = State.ComboPress, Decimals = 2, Suffix = "s",
-    Callback = function(v) State.ComboPress = v end })
-S_Time:Slider({ Title = "Dash Release", Min = 0.15, Max = 0.7, Default = State.DashReleaseTime, Decimals = 2, Suffix = "s",
-    Callback = function(v) State.DashReleaseTime = v end })
-S_Time:Slider({ Title = "Post-dash No-Block", Min = 0.1, Max = 0.6, Default = State.PostDashNoBlock, Decimals = 2, Suffix = "s",
-    Callback = function(v) State.PostDashNoBlock = v end })
+S_Time:Slider({ Title="Poke Block Time", Min=0.08, Max=0.35, Default=State.MinPress, Decimals=2, Suffix="s", Callback=function(v) State.MinPress=v end })
+S_Time:Slider({ Title="Combo Block Time", Min=0.4, Max=1.0, Default=State.ComboPress, Decimals=2, Suffix="s", Callback=function(v) State.ComboPress=v end })
+S_Time:Slider({ Title="Dash Release", Min=0.15, Max=0.7, Default=State.DashReleaseTime, Decimals=2, Suffix="s", Callback=function(v) State.DashReleaseTime=v end })
+S_Time:Slider({ Title="Post-dash No-Block", Min=0.1, Max=0.6, Default=State.PostDashNoBlock, Decimals=2, Suffix="s", Callback=function(v) State.PostDashNoBlock=v end })
 
-local CamMini -- forward-declared
-local T_Cam = S_Cam:Toggle({ Title = "Camera Lock", Default = false, Callback = function(v)
-    State.CamLock = v; if CamMini then CamMini:SetVisible(v) end
-end })
-S_View:Slider({ Title = "View Cone", Min = 10, Max = 70, Default = State.CamFovDeg, Suffix = "deg",
-    Callback = function(v) State.CamFovDeg = v end })
-S_View:Slider({ Title = "Max Distance", Min = 30, Max = 250, Default = State.CamMaxDistance, Suffix = "studs",
-    Callback = function(v) State.CamMaxDistance = v end })
-S_View:Toggle({ Title = "Require LoS", Default = true, Callback = function(v) State.CamDoLoS = v end })
+local CamMini
+local T_Cam = S_Cam:Toggle({ Title="Camera Lock", Default=false, Callback=function(v) State.CamLock=v; if CamMini then CamMini:SetVisible(v) end end })
+S_View:Slider({ Title="View Cone", Min=10, Max=70, Default=State.CamFovDeg, Suffix="deg", Callback=function(v) State.CamFovDeg=v end })
+S_View:Slider({ Title="Max Distance", Min=30, Max=250, Default=State.CamMaxDistance, Suffix="studs", Callback=function(v) State.CamMaxDistance=v end })
+S_View:Toggle({ Title="Require LoS", Default=true, Callback=function(v) State.CamDoLoS=v end })
 
--- Separate Camlock mini window
-CamMini = WindUI:CreateWindow({ Title = "Camlock", Icon = "crosshair", Size = UDim2.fromOffset(260, 120), Parent = get_ui_parent() })
-local MiniSec = CamMini:Section({ Title = "Quick" })
-local MiniToggle = MiniSec:Toggle({ Title = "Enabled", Default = false, Callback = function(v) T_Cam:Set(v) end })
-local MiniLabel = MiniSec:Paragraph({ Title = "Target", Desc = "None" })
+CamMini = WindUI:CreateWindow({ Title="Camlock", Icon="crosshair", Size=UDim2.fromOffset(260,120), Parent=get_ui_parent() })
+local MiniSec = CamMini:Section({ Title="Quick" })
+local MiniToggle = MiniSec:Toggle({ Title="Enabled", Default=false, Callback=function(v) T_Cam:Set(v) end })
+local MiniLabel = MiniSec:Paragraph({ Title="Target", Desc="None" })
 CamMini:SetVisible(false)
 
 -- Export for Part 2
@@ -165,16 +127,15 @@ _G.__TSB_Wind = {
     MiniLabel = MiniLabel,
     Communicate = Communicate,
 }
--- TSB WindUI Autoblock + Camlock (Part 2/2): logic loop with guards
+-- TSB WindUI Autoblock + Camlock (Part 2/2): logic
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Abort cleanly if UI/state wasn’t exported (prevents line 1/17 nil access)
 if not _G.__TSB_Wind or type(_G.__TSB_Wind) ~= "table" then
-    warn("[TSB] UI failed to init; skipping logic.")
+    warn("[TSB] UI not initialized; skipping logic.")
     return
 end
 
@@ -187,7 +148,7 @@ local Communicate = W.Communicate
 
 local function now() return os.clock() end
 
--- IDs preserved from original file
+-- IDs from original
 local comboIDs = {10480793962, 10480796021}
 local allIDs = {
     Saitama={10469493270,10469630950,10469639222,10469643643, special=10479335397},
@@ -214,7 +175,7 @@ local skillIDs = {
 local function HRPOf(char) return char and char:FindFirstChild("HumanoidRootPart") end
 local function InLive(char) local live = Workspace:FindFirstChild("Live"); return char and char.Parent == (live or Workspace) end
 
--- Animation scan with pcall and null checks to ignore 404/missing assets
+-- Safe animation scan
 local lastScan = 0
 local function getAnims(hum)
     if not hum then return nil end
@@ -240,8 +201,7 @@ local function normalsAndSp(m,g) local n=0 for i=1,4 do if m[g[i]] then n+=1 end
 local function hasSkill(m) for id in pairs(m) do if skillIDs[id] then return true end end return false end
 
 local function TapM1IfClose(hrp)
-    local char = LocalPlayer.Character
-    local myHRP = char and char:FindFirstChild("HumanoidRootPart")
+    local char = LocalPlayer.Character; local myHRP = char and char:FindFirstChild("HumanoidRootPart")
     if not myHRP or not hrp then return end
     if (hrp.Position - myHRP.Position).Magnitude <= 10 then
         Communicate("LeftClick", true)
@@ -249,23 +209,18 @@ local function TapM1IfClose(hrp)
     end
 end
 
--- Autoblock logic with old timings
+-- Autoblock logic
 local function AutoBlockTick()
     if not State.AutoBlock or not CanReBlock() then return end
-    local myChar = LocalPlayer.Character
-    local myHRP = HRPOf(myChar)
+    local myChar = LocalPlayer.Character; local myHRP = HRPOf(myChar)
     if not myHRP then return end
-
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl ~= LocalPlayer and pl.Character and InLive(pl.Character) then
-            local hrp = HRPOf(pl.Character)
-            local hum = pl.Character:FindFirstChildOfClass("Humanoid")
+            local hrp = HRPOf(pl.Character); local hum = pl.Character:FindFirstChildOfClass("Humanoid")
             if not hrp or not hum then continue end
             local dist = (hrp.Position - myHRP.Position).Magnitude
             if dist > math.max(State.SpecialRange, State.SkillRange, State.NormalRange) then continue end
-
-            local m = getAnims(hum)
-            if not m then continue end
+            local m = getAnims(hum); if not m then continue end
 
             local cc = comboCount(m)
             for _, group in pairs(allIDs) do
@@ -292,17 +247,15 @@ local function AutoBlockTick()
     end
 end
 
--- M1 catch preserved
+-- M1 catch
 local lastCatch = 0
 local function M1CatchTick()
     if not State.M1Catch then return end
-    local myChar = LocalPlayer.Character
-    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myChar = LocalPlayer.Character; local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myHRP then return end
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl ~= LocalPlayer and pl.Character and InLive(pl.Character) then
-            local hrp = HRPOf(pl.Character)
-            local hum = pl.Character:FindFirstChildOfClass("Humanoid")
+            local hrp = HRPOf(pl.Character); local hum = pl.Character:FindFirstChildOfClass("Humanoid")
             if hrp and hum then
                 local d1 = (hrp.Position - myHRP.Position).Magnitude
                 if d1 <= 30 then
@@ -324,7 +277,7 @@ local function M1CatchTick()
     end
 end
 
--- Camlock: camera-cone target with optional LoS; only adjusts camera CFrame
+-- Camlock: camera cone with LoS; camera-only CFrame
 local targetHRP
 local function HasLoS(fromPos, toPart)
     if not State.CamDoLoS then return true end
@@ -335,23 +288,18 @@ local function HasLoS(fromPos, toPart)
     return not res or res.Instance:IsDescendantOf(toPart.Parent)
 end
 local function ChooseFrontTarget()
-    local cam = Workspace.CurrentCamera
-    if not cam then return nil end
+    local cam = Workspace.CurrentCamera; if not cam then return nil end
     local camPos, look = cam.CFrame.Position, cam.CFrame.LookVector
     local cosThresh = math.cos(math.rad(State.CamFovDeg))
     local best, bestDot = nil, cosThresh
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl ~= LocalPlayer and pl.Character and InLive(pl.Character) then
-            local hrp = HRPOf(pl.Character)
-            local hum = pl.Character:FindFirstChildOfClass("Humanoid")
+            local hrp = HRPOf(pl.Character); local hum = pl.Character:FindFirstChildOfClass("Humanoid")
             if hrp and hum and hum.Health > 0 then
-                local vec = hrp.Position - camPos
-                local dist = vec.Magnitude
+                local vec = hrp.Position - camPos; local dist = vec.Magnitude
                 if dist <= State.CamMaxDistance then
                     local d = vec.Unit:Dot(look)
-                    if d >= bestDot and HasLoS(camPos, hrp) then
-                        best, bestDot = hrp, d
-                    end
+                    if d >= bestDot and HasLoS(camPos, hrp) then best, bestDot = hrp, d end
                 end
             end
         end
@@ -369,27 +317,23 @@ local function UpdateMini(hrp)
 end
 local function CamLockTick()
     if not State.CamLock then return end
-    local cam = Workspace.CurrentCamera
-    local char = LocalPlayer.Character
+    local cam = Workspace.CurrentCamera; local char = LocalPlayer.Character
     local myHRP = char and char:FindFirstChild("HumanoidRootPart")
     if not cam or not myHRP then return end
-
     if not targetHRP or not targetHRP.Parent then
-        targetHRP = ChooseFrontTarget()
-        UpdateMini(targetHRP)
+        targetHRP = ChooseFrontTarget(); UpdateMini(targetHRP)
     else
         local camPos, look = cam.CFrame.Position, cam.CFrame.LookVector
         local dir = (targetHRP.Position - camPos).Unit
         if dir:Dot(look) < math.cos(math.rad(State.CamFovDeg + 10)) then
-            targetHRP = ChooseFrontTarget()
-            UpdateMini(targetHRP)
+            targetHRP = ChooseFrontTarget(); UpdateMini(targetHRP)
         end
     end
     if not targetHRP then return end
     cam.CFrame = CFrame.lookAt(cam.CFrame.Position, targetHRP.Position)
 end
 
--- Main loop (created after UI so state refs are live)
+-- Main loop
 RunService.Heartbeat:Connect(function()
     DashGuard()
     if State.AutoBlock then
