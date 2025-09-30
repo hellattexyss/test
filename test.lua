@@ -1,12 +1,14 @@
--- TSB Autoblock + Camlock (Part 1/2): Flat Tabs (no sections), responsive size, autosave, mini camlock
+-- TSB Autoblock + Camlock UI (Part 1/2): Pure Roblox GUI (no WindUI), reliable on all executors
 
-local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local Lighting = game:GetService("Lighting")
-local LocalPlayer = Players.LocalPlayer
+-- Services
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local UserInputService=game:GetService("UserInputService")
+local Workspace=game:GetService("Workspace")
+local Lighting=game:GetService("Lighting")
+local LocalPlayer=Players.LocalPlayer
 
--- State
+-- State defaults
 getgenv().tsbConfig = getgenv().tsbConfig or {
     AutoBlock=false, M1After=false, M1Catch=false,
     NormalRange=30, SpecialRange=50, SkillRange=50, SkillHold=1.2,
@@ -16,49 +18,30 @@ getgenv().tsbConfig = getgenv().tsbConfig or {
 }
 local State = getgenv().tsbConfig
 
--- Responsive size helper
-local function viewportSize()
-    local cam = Workspace.CurrentCamera
-    local v = cam and cam.ViewportSize or Vector2.new(1280, 720)
-    return v
+-- Autosave (writefile-based)
+local savePath="TSB_WindUI_autosave.json"
+local function jsonify(tbl)
+    local ok, enc = pcall(game.HttpService.JSONEncode, game.HttpService, tbl)
+    return ok and enc or nil
 end
-local vp = viewportSize()
-local W = math.max(680, math.floor(vp.X*0.8))
-local H = math.max(520, math.floor(vp.Y*0.75))
-
--- Window (force size and min size)
-local Window = WindUI:CreateWindow({
-    Title="TSB Autoblock + Camlock",
-    Icon="shield",
-    Folder="TSB_WindUI",
-    Size=UDim2.fromOffset(W, H),
-    Theme="Dark",
-    Resizable=true,
-    SideBarWidth=140,
-    HideSearchBar=true,
-    ScrollBarEnabled=true,
-})
-if Window and Window.Instance then
-    -- enforce size after theme applies
-    task.defer(function()
-        pcall(function()
-            Window.Instance.Size = UDim2.fromOffset(W, H)
-            if Window.Instance.SetMinSize then Window.Instance:SetMinSize(Vector2.new(680, 520)) end
-        end)
-    end)
+local function parsejson(str)
+    local ok, dec = pcall(game.HttpService.JSONDecode, game.HttpService, str)
+    return ok and dec or nil
+end
+local function autosave()
+    if writefile and jsonify then
+        pcall(writefile, savePath, jsonify(State) or "")
+    end
+end
+if isfile and isfile(savePath) and parsejson then
+    local ok, data = pcall(readfile, savePath)
+    if ok and data then
+        local dec = parsejson(data)
+        if type(dec)=="table" then for k,v in pairs(dec) do State[k]=v end end
+    end
 end
 
--- Autosave/load
-local Config = Window.ConfigManager
-local default = Config:CreateConfig("default")
-local saveFlag = "WindUI/"..Window.Folder.."/config/autosave"
-local loadFlag = "WindUI/"..Window.Folder.."/config/autoload"
-local function markAuto(path,on) if on and writefile then pcall(writefile,path,"") elseif not on and delfile then pcall(delfile,path) end end
-if isfile and isfile(loadFlag) then pcall(function() default:Load() end) end
-markAuto(loadFlag,true); markAuto(saveFlag,true)
-local function autosave() if default then pcall(function() default:Save() end) end end
-
--- Remotes + block
+-- Communicate + block control
 local function Communicate(goal, keycode, mobile)
     local c=LocalPlayer.Character; if not c then return end
     local r=c:FindFirstChild("Communicate"); if not r then return end
@@ -74,62 +57,118 @@ end
 local function DashGuard() if IsDashing() then lastDashAt=os.clock(); ReleaseBlock(); return end if os.clock()-lastDashAt<=State.DashReleaseTime then ReleaseBlock() end end
 local function CanReBlock() return (os.clock()-lastDashAt)>State.PostDashNoBlock end
 
--- Tabs (flat controls)
-local Combat = Window:Tab({ Title="Combat", Icon="swords" })
-local CamTab = Window:Tab({ Title="Camlock", Icon="camera" })
-local Tune = Window:Tab({ Title="Tuning", Icon="sliders" })
-local Misc = Window:Tab({ Title="Misc", Icon="settings" })
+-- UI Builder (pure Roblox)
+local Screen = Instance.new("ScreenGui")
+Screen.Name="TSB_StableUI"
+Screen.ResetOnSpawn=false
+do local ok,hui=pcall(gethui); (ok and typeof(hui)=="Instance" and (Screen.Parent=hui)) or (Screen.Parent=LocalPlayer:WaitForChild("PlayerGui")) end
 
--- Combat tab
-Combat:Label({ Title="Autoblock" })
-Combat:Toggle({ Title="Auto Block", Value=State.AutoBlock, Callback=function(v) State.AutoBlock=v; if not v then ReleaseBlock() end; autosave() end })
-Combat:Toggle({ Title="M1 After Block", Value=State.M1After, Callback=function(v) State.M1After=v; autosave() end })
-Combat:Toggle({ Title="M1 Catch", Value=State.M1Catch, Callback=function(v) State.M1Catch=v; autosave() end })
+local cam=Workspace.CurrentCamera; local vp=cam and cam.ViewportSize or Vector2.new(1280,720)
+local W,H=math.max(720, math.floor(vp.X*0.8)), math.max(560, math.floor(vp.Y*0.75))
 
--- Camlock tab
-CamTab:Label({ Title="Controls" })
-CamTab:Toggle({ Title="Camera Lock", Value=State.CamLock, Callback=function(v) State.CamLock=v; autosave(); if mini then mini:SetVisible(v) end end })
-CamTab:Toggle({ Title="Require LoS", Value=State.CamDoLoS, Callback=function(v) State.CamDoLoS=v; autosave() end })
+local Root = Instance.new("Frame")
+Root.Name="Root"
+Root.AnchorPoint=Vector2.new(0.5,0.5)
+Root.Position=UDim2.fromScale(0.5,0.5)
+Root.Size=UDim2.fromOffset(W,H)
+Root.BackgroundColor3=Color3.fromRGB(24,24,24)
+Root.Active=true; Root.Draggable=true
+Root.Parent=Screen
 
--- Tuning tab
-Tune:Label({ Title="Ranges" })
-Tune:Slider({ Title="Normal Range", Value={Min=5,Max=120,Default=State.NormalRange}, Callback=function(n) State.NormalRange=tonumber(n); autosave() end })
-Tune:Slider({ Title="Special Range", Value={Min=10,Max=150,Default=State.SpecialRange}, Callback=function(n) State.SpecialRange=tonumber(n); autosave() end })
-Tune:Slider({ Title="Skill Range", Value={Min=10,Max=150,Default=State.SkillRange}, Callback=function(n) State.SkillRange=tonumber(n); autosave() end })
-Tune:Label({ Title="Timings" })
-Tune:Slider({ Title="Skill Hold (s)", Step=0.05, Value={Min=0.2,Max=3,Default=State.SkillHold}, Callback=function(n) State.SkillHold=tonumber(n); autosave() end })
-Tune:Slider({ Title="Poke Block Time", Step=0.01, Value={Min=0.08,Max=0.35,Default=State.MinPress}, Callback=function(n) State.MinPress=tonumber(n); autosave() end })
-Tune:Slider({ Title="Combo Block Time", Step=0.01, Value={Min=0.4,Max=1.0,Default=State.ComboPress}, Callback=function(n) State.ComboPress=tonumber(n); autosave() end })
-Tune:Slider({ Title="Dash Release", Step=0.01, Value={Min=0.15,Max=0.7,Default=State.DashReleaseTime}, Callback=function(n) State.DashReleaseTime=tonumber(n); autosave() end })
-Tune:Slider({ Title="Post-dash No-Block", Step=0.01, Value={Min=0.1,Max=0.6,Default=State.PostDashNoBlock}, Callback=function(n) State.PostDashNoBlock=tonumber(n); autosave() end })
+local Title = Instance.new("TextLabel")
+Title.BackgroundTransparency=1
+Title.TextXAlignment=Enum.TextXAlignment.Left
+Title.Font=Enum.Font.GothamBold; Title.TextSize=16
+Title.TextColor3=Color3.fromRGB(235,235,235)
+Title.Text="TSB Autoblock + Camlock"
+Title.Size=UDim2.new(1,-20,0,28); Title.Position=UDim2.new(0,10,0,6)
+Title.Parent=Root
 
--- Misc tab
-Misc:Label({ Title="Performance" })
-local originalLighting={}
-local function applyFPS(on)
-    if on then
-        originalLighting.FogEnd=Lighting.FogEnd
-        Lighting.FogEnd=9e9
-        for _,inst in ipairs(Workspace:GetDescendants()) do
-            if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("PostEffect") or inst:IsA("PointLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
-                inst.Enabled=false
-            end
-        end
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-    else
-        if originalLighting.FogEnd then Lighting.FogEnd=originalLighting.FogEnd end
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+local Sidebar = Instance.new("Frame")
+Sidebar.Size=UDim2.new(0,140,1,-44)
+Sidebar.Position=UDim2.new(0,10,0,36)
+Sidebar.BackgroundColor3=Color3.fromRGB(30,30,30)
+Sidebar.Parent=Root
+local SideList=Instance.new("UIListLayout", Sidebar)
+SideList.Padding=UDim.new(0,8); SideList.SortOrder=Enum.SortOrder.LayoutOrder
+
+local Content = Instance.new("ScrollingFrame")
+Content.Size=UDim2.new(1,-(140+30),1,-44)
+Content.Position=UDim2.new(0,160,0,36)
+Content.BackgroundColor3=Color3.fromRGB(20,20,20)
+Content.ScrollBarThickness=6
+Content.Parent=Root
+local ContentList=Instance.new("UIListLayout", Content)
+ContentList.Padding=UDim.new(0,10); ContentList.SortOrder=Enum.SortOrder.LayoutOrder
+
+local function clearContent()
+    for _,c in ipairs(Content:GetChildren()) do
+        if c:IsA("GuiObject") then c:Destroy() end
     end
 end
-Misc:Toggle({ Title="FPS Boost", Value=State.FPSBoost, Callback=function(v) State.FPSBoost=v; applyFPS(v); autosave() end })
 
--- Camlock mini window
-local mini = WindUI:CreateWindow({ Title="Camlock", Icon="crosshair", Size=UDim2.fromOffset(300,140), Transparent=true, Theme="Dark", Resizable=true, HideSearchBar=true, ScrollBarEnabled=false })
-local miniSec = mini:Tab({ Title="Mini", Icon="power" }) -- Add simple tab to ensure content in some builds
-mini:SetVisible(State.CamLock)
-miniSec:Toggle({ Title="Enabled", Value=State.CamLock, Callback=function(v) State.CamLock=v; mini:SetVisible(v); autosave() end })
+local function Header(text)
+    local L=Instance.new("TextLabel")
+    L.BackgroundTransparency=1
+    L.TextXAlignment=Enum.TextXAlignment.Left
+    L.Font=Enum.Font.GothamBold; L.TextSize=14
+    L.TextColor3=Color3.fromRGB(230,230,230)
+    L.Text=text; L.Size=UDim2.new(1,-12,0,20); L.Position=UDim2.new(0,6,0,0)
+    L.Parent=Content
+end
+local function Toggle(label, init, cb)
+    local B=Instance.new("TextButton")
+    B.Size=UDim2.new(1,-12,0,28)
+    B.Position=UDim2.new(0,6,0,0)
+    B.BackgroundColor3=Color3.fromRGB(50,50,50)
+    B.AutoButtonColor=false
+    local val=not not init
+    local function paint() B.Text=label..": "..(val and "ON" or "OFF"); B.Font=Enum.Font.Gotham; B.TextSize=14; B.TextColor3=Color3.fromRGB(235,235,235); B.BackgroundColor3= val and Color3.fromRGB(50,140,70) or Color3.fromRGB(50,50,50) end
+    paint(); B.Parent=Content
+    B.MouseButton1Click:Connect(function() val=not val; paint(); if cb then cb(val) end end)
+    return { Set=function(_,v) val=not not v; paint(); if cb then cb(val) end end }
+end
+local function Slider(label, min, max, def, step, cb)
+    local F=Instance.new("Frame"); F.Size=UDim2.new(1,-12,0,40); F.BackgroundColor3=Color3.fromRGB(45,45,45); F.Parent=Content
+    local L=Instance.new("TextLabel"); L.BackgroundTransparency=1; L.TextXAlignment=Enum.TextXAlignment.Left; L.Font=Enum.Font.Gotham; L.TextSize=13; L.TextColor3=Color3.fromRGB(235,235,235); L.Text=label; L.Size=UDim2.new(1,-12,0,16); L.Position=UDim2.new(0,6,0,2); L.Parent=F
+    local Bar=Instance.new("Frame"); Bar.Size=UDim2.new(1,-12,0,8); Bar.Position=UDim2.new(0,6,0,24); Bar.BackgroundColor3=Color3.fromRGB(28,28,28); Bar.Parent=F
+    local Fill=Instance.new("Frame"); Fill.Size=UDim2.new(0,0,1,0); Fill.BackgroundColor3=Color3.fromRGB(90,160,100); Fill.Parent=Bar
+    local v=def or min; step=step or ((max-min)<=10 and 0.01 or 1)
+    local function set(vn)
+        vn=math.clamp(vn,min,max)
+        if step and step>0 then vn=math.floor((vn/step)+0.5)*step end
+        v=vn
+        local pct=(v-min)/math.max(1e-9,(max-min)); Fill.Size=UDim2.new(pct,0,1,0)
+        L.Text=string.format("%s: %g", label, v)
+        if cb then cb(v) end
+    end
+    local dragging=false
+    local function at(x)
+        local w=math.max(1, Bar.AbsoluteSize.X)
+        local rel=math.clamp((x - Bar.AbsolutePosition.X)/w,0,1)
+        set(min+(max-min)*rel)
+    end
+    Bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true; at(i.Position.X) end end)
+    Bar.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
+    UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then at(i.Position.X) end end)
+    task.defer(function() set(v) end)
+    return { Set=set }
+end
+local function addTab(name, onClick)
+    local B=Instance.new("TextButton")
+    B.Size=UDim2.new(1,-8,0,28); B.BackgroundColor3=Color3.fromRGB(40,40,40); B.AutoButtonColor=false
+    B.Text=name; B.Font=Enum.Font.Gotham; B.TextSize=14; B.TextColor3=Color3.fromRGB(235,235,235); B.Parent=Sidebar
+    B.MouseButton1Click:Connect(function() for _,c in ipairs(Sidebar:GetChildren()) do if c:IsA("TextButton") then c.BackgroundColor3=Color3.fromRGB(40,40,40) end end; B.BackgroundColor3=Color3.fromRGB(60,60,60); clearContent(); onClick() end)
+    return B
+end
 
--- Target highlight
+-- Camlock mini + highlight
+local Mini = Instance.new("Frame")
+Mini.Size=UDim2.fromOffset(280,130); Mini.Position=UDim2.new(0, 20, 0, 80)
+Mini.BackgroundColor3=Color3.fromRGB(25,25,25); Mini.Visible=State.CamLock; Mini.Parent=Screen
+local MiniLabel=Instance.new("TextLabel"); MiniLabel.BackgroundTransparency=1; MiniLabel.TextXAlignment=Enum.TextXAlignment.Left; MiniLabel.Font=Enum.Font.Gotham; MiniLabel.TextSize=13; MiniLabel.TextColor3=Color3.fromRGB(230,230,230); MiniLabel.Text="Camlock: "..(State.CamLock and "ON" or "OFF"); MiniLabel.Size=UDim2.new(1,-12,0,20); MiniLabel.Position=UDim2.new(0,6,0,6); MiniLabel.Parent=Mini
+local miniBtn=Instance.new("TextButton"); miniBtn.Size=UDim2.new(1,-12,0,26); miniBtn.Position=UDim2.new(0,6,0,30); miniBtn.BackgroundColor3=Color3.fromRGB(50,50,50); miniBtn.Text="Toggle"; miniBtn.Font=Enum.Font.Gotham; miniBtn.TextSize=14; miniBtn.TextColor3=Color3.fromRGB(235,235,235); miniBtn.Parent=Mini
+miniBtn.MouseButton1Click:Connect(function() State.CamLock=not State.CamLock; Mini.Visible=State.CamLock; MiniLabel.Text="Camlock: "..(State.CamLock and "ON" or "OFF"); autosave() end)
 local highlight
 local function setHighlight(model)
     if highlight then highlight:Destroy(); highlight=nil end
@@ -142,7 +181,63 @@ local function setHighlight(model)
     highlight=h
 end
 
--- Export to logic
+-- Tabs content
+addTab("Combat", function()
+    Header("Autoblock")
+    Toggle("Auto Block", State.AutoBlock, function(v) State.AutoBlock=v; if not v then ReleaseBlock() end; autosave() end)
+    Toggle("M1 After Block", State.M1After, function(v) State.M1After=v; autosave() end)
+    Toggle("M1 Catch", State.M1Catch, function(v) State.M1Catch=v; autosave() end)
+end).BackgroundColor3=Color3.fromRGB(60,60,60) -- select default
+
+addTab("Camlock", function()
+    Header("Controls")
+    Toggle("Camera Lock", State.CamLock, function(v) State.CamLock=v; Mini.Visible=v; MiniLabel.Text="Camlock: "..(v and "ON" or "OFF"); autosave() end)
+    Toggle("Require LoS", State.CamDoLoS, function(v) State.CamDoLoS=v; autosave() end)
+end)
+
+addTab("Tuning", function()
+    Header("Ranges")
+    Slider("Normal Range", 5,120, State.NormalRange, 1, function(v) State.NormalRange=v; autosave() end)
+    Slider("Special Range",10,150, State.SpecialRange,1, function(v) State.SpecialRange=v; autosave() end)
+    Slider("Skill Range", 10,150, State.SkillRange, 1, function(v) State.SkillRange=v; autosave() end)
+    Header("Timings")
+    Slider("Skill Hold (s)", 0.2,3, State.SkillHold, 0.05, function(v) State.SkillHold=v; autosave() end)
+    Slider("Poke Block Time", 0.08,0.35, State.MinPress, 0.01, function(v) State.MinPress=v; autosave() end)
+    Slider("Combo Block Time",0.4,1.0, State.ComboPress,0.01, function(v) State.ComboPress=v; autosave() end)
+    Slider("Dash Release", 0.15,0.7, State.DashReleaseTime,0.01, function(v) State.DashReleaseTime=v; autosave() end)
+    Slider("Post-dash No-Block",0.1,0.6, State.PostDashNoBlock,0.01, function(v) State.PostDashNoBlock=v; autosave() end)
+end)
+
+addTab("Misc", function()
+    Header("Performance")
+    local originalFog
+    Toggle("FPS Boost", State.FPSBoost, function(v)
+        State.FPSBoost=v
+        if v then
+            originalFog=Lighting.FogEnd
+            Lighting.FogEnd=9e9
+            for _,inst in ipairs(Workspace:GetDescendants()) do
+                if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("PostEffect") or inst:IsA("PointLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
+                    inst.Enabled=false
+                end
+            end
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        else
+            if originalFog then Lighting.FogEnd=originalFog end
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+        end
+        autosave()
+    end)
+end)
+
+-- Select default first tab manually
+clearContent()
+Header("Autoblock")
+Toggle("Auto Block", State.AutoBlock, function(v) State.AutoBlock=v; if not v then ReleaseBlock() end; autosave() end)
+Toggle("M1 After Block", State.M1After, function(v) State.M1After=v; autosave() end)
+Toggle("M1 Catch", State.M1Catch, function(v) State.M1Catch=v; autosave() end)
+
+-- Export for logic
 _G.__TSB_Wind = {
     State=State,
     Communicate=Communicate,
@@ -152,7 +247,7 @@ _G.__TSB_Wind = {
     CanReBlock=CanReBlock,
     SetHighlight=setHighlight,
 }
--- TSB Autoblock + Camlock (Part 2/2): Logic (unchanged features)
+-- TSB Autoblock + Camlock Logic (Part 2/2): accurate autoblock, camlock cone + highlight
 
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
@@ -166,6 +261,7 @@ local Communicate=W.Communicate
 local PressBlock,ReleaseBlock=W.PressBlock,W.ReleaseBlock
 local DashGuard,CanReBlock=W.DashGuard,W.CanReBlock
 local SetHighlight=W.SetHighlight
+
 local function now() return os.clock() end
 
 local comboIDs={10480793962,10480796021}
@@ -232,6 +328,7 @@ end
 local function AutoBlockTick()
     if not State.AutoBlock or not CanReBlock() then return end
     local ch=LocalPlayer.Character; local my=HRPOf(ch); if not my then return end
+
     local bestThreat,bestDist=nil,1e9
     for _,pl in ipairs(Players:GetPlayers()) do
         if pl~=LocalPlayer and pl.Character and InLive(pl.Character) then
