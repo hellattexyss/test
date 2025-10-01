@@ -4,7 +4,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Config defaults (autoblock kept exact)
+-- Config defaults (autoblock untouched)
 getgenv().tsb = getgenv().tsb or {
     AutoBlock=false, M1After=false,
     NormalRange=30, SpecialRange=50, SkillRange=50, SkillHold=1.2,
@@ -29,7 +29,7 @@ local Window = Windui:CreateWindow({
     ScrollBarEnabled = true,
 })
 
--- Config manager autosave/autoload like example
+-- Config manager autosave/autoload
 local Config = Window.ConfigManager
 local default = Config:CreateConfig("default")
 local saveFlag = "WindUI/" .. Window.Folder .. "/config/autosave"
@@ -48,7 +48,7 @@ local Cam    = Window:Tab({ Title = "Camlock", Icon = "camera" })
 local Tuning = Window:Tab({ Title = "Tuning", Icon = "sliders" })
 local Misc   = Window:Tab({ Title = "Misc", Icon = "settings" })
 
--- Elements registry like example
+-- Elements registry
 local E = {}
 
 -- Combat (no M1 Catch)
@@ -65,7 +65,7 @@ E.m1a = Combat:Toggle({
     Callback = function(v) S.M1After=v; autosave() end,
 })
 
--- Camlock controls
+-- Camlock
 E.cl  = Cam:Toggle({
     Title = "Camera Lock",
     Value = S.CamLock,
@@ -82,7 +82,7 @@ E.los = Cam:Toggle({
     Callback = function(v) S.CamDoLoS=v; autosave() end,
 })
 
--- Tuning (sliders in example style)
+-- Tuning
 E.rn = Tuning:Slider({
     Title = "Normal Range",
     Value = { Min=5, Max=120, Default=S.NormalRange },
@@ -129,7 +129,7 @@ E.tpost = Tuning:Slider({
     Callback = function(v) S.PostDashNoBlock=tonumber(v); autosave() end,
 })
 
--- Misc (placeholder FPS toggle; logic optional)
+-- Misc (optional)
 E.fps = Misc:Toggle({
     Title = "FPS Boost",
     Desc  = "Disable heavy effects",
@@ -137,12 +137,12 @@ E.fps = Misc:Toggle({
     Callback = function(v) S.FPSBoost=v; autosave() end,
 })
 
--- Register for autosave like example
+-- Register elements with config
 for _, el in pairs(E) do
     if el and el.Title then default:Register(el.Title, el) end
 end
 
--- Separate draggable Camlock rectangular button (theme-aligned)
+-- Separate draggable Camlock button (mirrors toggle)
 do
     local parent = (pcall(gethui) and gethui()) or Players.LocalPlayer:WaitForChild("PlayerGui")
     local Screen = Instance.new("ScreenGui")
@@ -182,7 +182,7 @@ end
 _G.__TSB_Wind = _G.__TSB_Wind or {}
 _G.__TSB_Wind.State = S
 _G.__TSB_Wind.AutoSave = _G.__TSB_Wind.AutoSave or autosave
--- TSB Logic — keeps autoblock logic intact; removes M1 Catch; adds timed M1 After Block counter
+-- TSB Logic — autoblock core untouched; dash spam fixed; M1-after-block tied to commit
 
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
@@ -192,7 +192,7 @@ local LocalPlayer=Players.LocalPlayer
 local S = (_G.__TSB_Wind and _G.__TSB_Wind.State) or getgenv().tsb
 if not S then warn("TSB: config missing"); return end
 
--- Remotes/controls (same)
+-- Remotes / controls
 local function Communicate(goal, keycode, mobile)
     local c=LocalPlayer.Character; if not c then return end
     local r=c:FindFirstChild("Communicate"); if not r then return end
@@ -209,7 +209,7 @@ local function DashGuard() if IsDashing() then lastDashAt=os.clock(); ReleaseBlo
 local function CanReBlock() return (os.clock()-lastDashAt)>S.PostDashNoBlock end
 local function now() return os.clock() end
 
--- IDs (unchanged)
+-- IDs
 local comboIDs={10480793962,10480796021}
 local allIDs={
     Saitama={10469493270,10469630950,10469639222,10469643643, special=10479335397},
@@ -248,8 +248,7 @@ local function getAnims(h)
     for _,t in ipairs(tr) do
         local anim=t.Animation
         if anim and anim.AnimationId then
-            local id=tonumber(anim.AnimationId:match("%d+"))
-            if id then m[id]=true end
+            local id=tonumber(anim.AnimationId:match("%d+")); if id then m[id]=true end
         end
     end
     return m
@@ -259,12 +258,40 @@ local function comboCount(m) local c=0 for _,id in ipairs(comboIDs) do if m[id] 
 local function normalsAndSp(m,g) local n=0 for i=1,4 do if m[g[i]] then n+=1 end end return n, m[g.special] and true or false end
 local function hasSkill(m) for id in pairs(m) do if skillIDs[id] then return true end end return false end
 
--- Remove M1 Catch completely (no functions or calls for it).
+-- Dash spam suppression: block grace after speed burst
+local lastDashSpikeAt = 0
+local DashGrace = 0.22
+local function HorizontalSpeed()
+    local c=LocalPlayer.Character; local hrp=c and c:FindFirstChild("HumanoidRootPart")
+    if not hrp then return 0 end
+    local v=hrp.Velocity; return Vector3.new(v.X,0,v.Z).Magnitude
+end
+local function DashGuard2()
+    local speed = HorizontalSpeed()
+    if speed >= 38 then
+        lastDashSpikeAt = os.clock()
+        ReleaseBlock()
+        return
+    end
+    if os.clock() - lastDashSpikeAt < DashGrace then
+        ReleaseBlock()
+    end
+end
 
--- Perfect-block counter timing for M1 After Block (does not alter autoblock timings)
-local recentBlockAt = {}          -- attacker Player -> time when block pressed
-local COUNTER_MIN_DELAY = 0.06    -- 60 ms after block press
-local COUNTER_MAX_DELAY = 0.10    -- up to 100 ms window
+-- Perfect-block counter tied to commit frame
+local COUNTER_SCAN_MS = 0.14
+local COMMIT_RELEASE_DELAY = 0.02
+local COMMIT_M1_DELAY = 0.04
+
+local function IsCommitFrame(attHum, attHRP)
+    local m = getAnims(attHum)
+    if not m then return false end
+    local cc=0; for _,id in ipairs(comboIDs) do if m[id] then cc+=1 end end
+    if cc>=1 then return true end
+    local v = attHRP and attHRP.Velocity or Vector3.zero
+    local h = Vector3.new(v.X,0,v.Z).Magnitude
+    return h < 10
+end
 
 local function TapM1IfClose(hrp)
     local ch=LocalPlayer.Character; local my=ch and ch:FindFirstChild("HumanoidRootPart")
@@ -275,27 +302,36 @@ local function TapM1IfClose(hrp)
     end
 end
 
-local function DoCounterIfWindow(attacker, hrp, stamp)
+local function ScheduleCounter(attackerPlr, attackerHRP)
     if not S.M1After then return end
-    if attacker~=nil and recentBlockAt[attacker]==stamp then
-        local dt=now()-stamp
-        if dt>=COUNTER_MIN_DELAY and dt<=COUNTER_MAX_DELAY then
-            -- Release then quick M1 to hit the perfect window
-            ReleaseBlock()
-            task.wait(0.01)
-            TapM1IfClose(hrp)
+    local start = now()
+    task.spawn(function()
+        while now() - start <= COUNTER_SCAN_MS do
+            local hum = attackerPlr.Character and attackerPlr.Character:FindFirstChildOfClass("Humanoid")
+            local hrp = attackerPlr.Character and attackerPlr.Character:FindFirstChild("HumanoidRootPart")
+            if hum and hrp and IsCommitFrame(hum, hrp) then
+                task.wait(COMMIT_RELEASE_DELAY)
+                ReleaseBlock()
+                task.wait(math.max(0, COMMIT_M1_DELAY - COMMIT_RELEASE_DELAY))
+                TapM1IfClose(hrp)
+                return
+            end
+            RunService.Heartbeat:Wait()
         end
-    end
+    end)
 end
 
--- Core autoblock (unchanged detection; only small record added)
+-- Core autoblock (unchanged decisions/timings; only added ScheduleCounter and grace gate)
 local lastBlockFrom={}, 0.25
 local BLOCK_COOLDOWN=0.25
 local COMBO_END_GAP=0.15
 local lastActiveAnimAt=0
 
 local function AutoBlockTick()
-    if not S.AutoBlock or not CanReBlock() then return end
+    if not S.AutoBlock then return end
+    if (os.clock() - lastDashSpikeAt) < DashGrace then return end
+    if not CanReBlock() then return end
+
     local ch=LocalPlayer.Character; local my=HRPOf(ch); if not my then return end
 
     local bestThreat,bestDist=nil,1e9
@@ -310,17 +346,11 @@ local function AutoBlockTick()
                         local cc=comboCount(m)
                         for _,g in pairs(allIDs) do
                             local n,sp=normalsAndSp(m,g)
-                            if cc==2 and n>=2 and dist<=S.SpecialRange then
-                                if dist<bestDist then bestThreat={pl,hrp,"combo"}; bestDist=dist end
-                            elseif n>0 and dist<=S.NormalRange then
-                                if dist<bestDist then bestThreat={pl,hrp,"poke"}; bestDist=dist end
-                            elseif sp and dist<=S.SpecialRange then
-                                if dist<bestDist then bestThreat={pl,hrp,"special"}; bestDist=dist end
-                            end
+                            if cc==2 and n>=2 and dist<=S.SpecialRange then if dist<bestDist then bestThreat={pl,hrp,"combo"}; bestDist=dist end
+                            elseif n>0 and dist<=S.NormalRange then if dist<bestDist then bestThreat={pl,hrp,"poke"}; bestDist=dist end
+                            elseif sp and dist<=S.SpecialRange then if dist<bestDist then bestThreat={pl,hrp,"special"}; bestDist=dist end end
                         end
-                        if hasSkill(m) and dist<=S.SkillRange then
-                            if dist<bestDist then bestThreat={pl,hrp,"skill"}; bestDist=dist end
-                        end
+                        if hasSkill(m) and dist<=S.SkillRange then if dist<bestDist then bestThreat={pl,hrp,"skill"}; bestDist=dist end end
                         for _ in pairs(m) do lastActiveAnimAt=now() break end
                     end
                 end
@@ -336,17 +366,13 @@ local function AutoBlockTick()
 
         if tag=="combo" or tag=="special" then
             PressBlock(); task.delay(S.ComboPress, ReleaseBlock)
-            recentBlockAt[pl]=t
-            task.delay(COUNTER_MIN_DELAY, function() DoCounterIfWindow(pl, hrp, t) end)
-            task.delay(COUNTER_MAX_DELAY+0.02, function() if recentBlockAt[pl]==t then recentBlockAt[pl]=nil end end)
+            ScheduleCounter(pl, hrp)
         elseif tag=="poke" then
             PressBlock(); task.delay(S.MinPress, ReleaseBlock)
-            recentBlockAt[pl]=t
-            task.delay(COUNTER_MIN_DELAY, function() DoCounterIfWindow(pl, hrp, t) end)
-            task.delay(COUNTER_MAX_DELAY+0.02, function() if recentBlockAt[pl]==t then recentBlockAt[pl]=nil end end)
+            ScheduleCounter(pl, hrp)
         elseif tag=="skill" then
             PressBlock(); task.delay(S.SkillHold, ReleaseBlock)
-            -- Usually do not counter skill immediately
+            -- usually no immediate counter on skill
         end
     else
         ReleaseBlock()
@@ -355,7 +381,7 @@ local function AutoBlockTick()
     if (now()-lastActiveAnimAt)>=COMBO_END_GAP then ReleaseBlock() end
 end
 
--- Camlock: same as before (camera cone with optional LoS and highlight from earlier versions)
+-- Camlock (unchanged)
 local highlight
 local function setHighlight(model)
     if highlight then highlight:Destroy(); highlight=nil end
@@ -409,8 +435,10 @@ local function CamLockTick()
     cam.CFrame=CFrame.lookAt(cam.CFrame.Position,targetHRP.Position)
 end
 
+-- Main loop
 RunService.Heartbeat:Connect(function()
-    DashGuard()
+    DashGuard()     -- original
+    DashGuard2()    -- dash-grace
     if S.AutoBlock then
         AutoBlockTick()
     else
